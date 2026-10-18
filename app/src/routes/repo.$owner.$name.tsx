@@ -21,23 +21,43 @@ export const Route = createFileRoute('/repo/$owner/$name')({
     // unauthenticated state the portfolio page shows instead of throwing.
     const session = await getSession()
     if (!session.authenticated) {
-      return { session, detail: undefined }
+      return { session, detail: undefined, outOfScope: false }
     }
     const detail = await loadRepository({
       data: { owner: params.owner, name: params.name },
     })
-    return { session, detail }
+    return { session, detail, outOfScope: detail === undefined }
   },
 })
 
 function RepositoryDetailPage() {
-  const { session, detail } = Route.useLoaderData()
+  const { session, detail, outOfScope } = Route.useLoaderData()
 
-  if (!session.authenticated || !detail) {
+  if (!session.authenticated) {
     return (
       <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
         <Header />
         <EmptyState />
+      </div>
+    )
+  }
+
+  if (!detail || outOfScope) {
+    return (
+      <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
+        <Header login={session.login} />
+        <main className="px-8 py-8">
+          <Link
+            to="/"
+            className="text-sm mb-6 inline-block"
+            style={{ color: 'var(--grove-text-muted)' }}
+          >
+            &larr; Portfolio
+          </Link>
+          <p className="text-sm" style={{ color: 'var(--grove-text-muted)' }}>
+            This repository is outside the selected portfolio scope.
+          </p>
+        </main>
       </div>
     )
   }

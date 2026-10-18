@@ -1,29 +1,46 @@
-export { createDb, getDb } from './client'
-export type { GroveDb } from './client'
-
+export type { BindingMethod, BindingRow, ResolutionRow } from './bindings'
 export {
-  getCurrentClimate,
+  extendBindingForName,
+  findOverlappingBinding,
+  getBindingsForIdentity,
+  getBindingsForName,
+  getDeclarationHistoryForIdentity,
+  getIdentityForName,
+  getObservedSpanForName,
+  getResolution,
+  getSnapshotHistoryForIdentity,
+  listResolutions,
+  listUnboundNames,
+  recordObservedBinding,
+  recordResolution,
+  recordResolvedBinding,
+} from './bindings'
+export type { GroveDb } from './client'
+export { createDb, getDb } from './client'
+export {
   getClimateHistory,
+  getCurrentClimate,
   persistClimate,
 } from './climate-store'
-
-export {
-  acceptProposal,
-  dismissProposal,
-  getActiveProposal,
-  persistProposal,
-  withdrawActiveProposal,
-} from './proposal-store'
-export type { ProposalStatus, StoredProposal } from './proposal-store'
-
 export {
   getDeclarationHistory,
   getLatestDeclaration,
   recordDeclarationIfChanged,
 } from './declarations'
-
+export type { ProposalSource, ProposalStatus, StoredProposal } from './proposal-store'
+export {
+  acceptProposal,
+  dismissProposal,
+  getActiveProposal,
+  markProposalSupported,
+  parseProposalSources,
+  persistProposal,
+  withdrawActiveProposal,
+} from './proposal-store'
+export type { SnapshotRow, WindowSubject } from './snapshots'
 export {
   getLatestSnapshot,
+  getPortfolioCalendarWindow,
   getPortfolioSnapshotWindow,
   getSnapshotHistory,
   recordSnapshot,

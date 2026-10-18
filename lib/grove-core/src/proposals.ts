@@ -2,6 +2,7 @@ import type {
   Climate,
   ClimateProposal,
   EcosystemTriggerResult,
+  ProposalEvidenceState,
   RepoPersistenceContext,
   Season,
 } from './types'
@@ -98,9 +99,7 @@ export interface ProposalConstraints {
   hasSetA: boolean
 }
 
-export function meetsProposalConstraints(
-  constraints: ProposalConstraints,
-): boolean {
+export function meetsProposalConstraints(constraints: ProposalConstraints): boolean {
   return (
     constraints.historyDays >= PROPOSAL_MIN_HISTORY_DAYS &&
     constraints.classifiedRepoCount >= PROPOSAL_MIN_REPOS &&
@@ -156,6 +155,42 @@ export function escalatedObservation(
  * - The trigger still fires but the observed direction has changed
  *   (e.g., divergence shifted from pruning to expansion)
  */
+/**
+ * §2.3 — Relate a standing proposal to the current evaluation window.
+ *
+ * - `supported`: the window carried enough evidence and reproduces the pattern.
+ * - `reversed`: the window carried enough evidence and the pattern is absent
+ *   or has changed direction — the proposal is to be withdrawn.
+ * - `not_observed`: the window did not carry enough observed days to
+ *   re-examine the pattern (`currentTriggers` is undefined), or the
+ *   repositories that could carry the pattern were not all observed enough
+ *   (`sourceEvidenceComplete` is false) while the pattern did not fire.
+ *   Missing evidence is not a reversal: the proposal stands, unchanged, and
+ *   is not presented as freshly supported.
+ *
+ * `sourceEvidenceComplete` says whether every repository in the stratum the
+ * proposal's trigger draws on (Set A for core divergence / split, Set B for
+ * long-arc drift) had sufficient evidence in the current window. Evidence
+ * from unrelated repositories never turns an unobserved pattern into a
+ * reversal.
+ */
+export function assessProposalEvidence(
+  proposal: ClimateProposal,
+  currentTriggers: EcosystemTriggerResult | undefined,
+  sourceEvidenceComplete = true,
+): ProposalEvidenceState {
+  if (!currentTriggers) return 'not_observed'
+  if (!shouldWithdrawProposal(proposal, currentTriggers)) return 'supported'
+  return sourceEvidenceComplete ? 'reversed' : 'not_observed'
+}
+
+/** The stratum a proposal's trigger draws its evidence from. */
+export function proposalSourceStratum(
+  proposal: ClimateProposal,
+): 'structural_core' | 'long_arc_domain' {
+  return proposal.triggerType === 'long_arc_drift' ? 'long_arc_domain' : 'structural_core'
+}
+
 export function shouldWithdrawProposal(
   proposal: ClimateProposal,
   currentTriggers: EcosystemTriggerResult,
@@ -167,9 +202,7 @@ export function shouldWithdrawProposal(
       if (currentTriggers.coreDivergence.length === 0) return true
       // Withdraw if the divergent direction has changed
       if (proposal.observedSeason) {
-        const currentSeason = findCoherentDivergentSeason(
-          currentTriggers.coreDivergence,
-        )
+        const currentSeason = findCoherentDivergentSeason(currentTriggers.coreDivergence)
         if (currentSeason !== proposal.observedSeason) return true
       }
       return false
@@ -180,10 +213,7 @@ export function shouldWithdrawProposal(
       if (currentTriggers.longArcDrift.repos.length === 0) return true
       // Withdraw if the coherent drift direction has changed
       if (proposal.observedSeason) {
-        if (
-          currentTriggers.longArcDrift.coherentSeason !==
-          proposal.observedSeason
-        ) {
+        if (currentTriggers.longArcDrift.coherentSeason !== proposal.observedSeason) {
           return true
         }
       }

@@ -8,6 +8,16 @@ interface ClimateBandProps {
   onDismissProposal?: () => void
 }
 
+const proposalDateFormat = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+})
+
+function formatProposalDate(iso: string): string {
+  return proposalDateFormat.format(new Date(iso))
+}
+
 const PROPOSAL_BASIS_DESCRIPTIONS: Record<string, string> = {
   sustained_core_divergence:
     'Structural core projects have persistently diverged from the declared climate.',
@@ -39,8 +49,7 @@ export function ClimateBand({
         <span style={{ color: 'var(--grove-text-muted)' }}>
           {climate ? (
             <>
-              Climate:{' '}
-              <span style={{ color: 'var(--grove-text)' }}>{climate}</span>
+              Climate: <span style={{ color: 'var(--grove-text)' }}>{climate}</span>
             </>
           ) : (
             'No climate declared'
@@ -78,14 +87,23 @@ export function ClimateBand({
                   'A persistent seasonal pattern has been observed.'}
               </p>
               {proposal.observedSeason && (
-                <p
-                  className="mt-1 text-xs"
-                  style={{ color: 'var(--grove-text-muted)' }}
-                >
+                <p className="mt-1 text-xs" style={{ color: 'var(--grove-text-muted)' }}>
                   Observed direction:{' '}
                   <span style={{ color: 'var(--grove-text)' }}>
                     {proposal.observedSeason}
                   </span>
+                </p>
+              )}
+              {proposal.evidence === 'not_observed' && (
+                <p
+                  className="mt-1 text-xs"
+                  style={{ color: 'var(--grove-text-muted)', opacity: 0.8 }}
+                >
+                  {proposal.lastSupportedAt
+                    ? `Last supported by observation on ${formatProposalDate(proposal.lastSupportedAt)}. `
+                    : ''}
+                  The recent window does not carry enough determinate observation to
+                  re-examine this pattern.
                 </p>
               )}
             </div>

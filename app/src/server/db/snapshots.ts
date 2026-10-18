@@ -1,10 +1,19 @@
 import type {
+  CalendarSlot,
   DensityObservation,
   RepositoryEcology,
   StructuralSignals,
 } from '@grove/core'
-import { desc, eq } from 'drizzle-orm'
+import { buildCalendarWindow, shiftDay } from '@grove/core'
+import { and, desc, eq, gte } from 'drizzle-orm'
 
+import {
+  currentSegmentStart,
+  extendBindingForName,
+  getBindingsForIdentity,
+  getSnapshotHistoryForIdentity,
+  recordObservedBinding,
+} from './bindings'
 import type { GroveDb } from './client'
 import { getDb } from './client'
 import { ecologySnapshots, repositories } from './schema'
@@ -18,13 +27,39 @@ interface RepositoryRow {
   defaultBranch: string
   pushedAt?: string | null
   sizeKb?: number | null
+  /** Immutable GitHub id when known; also records a time-bound name binding */
+  githubId?: number | null
+  /** Repository creation time; bounds adoption of rows recorded before identity tracking */
+  createdAt?: string | null
 }
 
 /**
  * Upsert a single repository into the reference table.
+ * When the immutable id is known, the (id, name) binding is recorded too.
  */
 export function upsertRepository(repo: RepositoryRow, db: GroveDb = getDb()) {
   const now = new Date().toISOString()
+  // better-sqlite3 transactions are synchronous; statements issued on `db`
+  // inside the callback run within the transaction (as recordSnapshot does).
+  db.transaction(() => {
+    upsertRepositoryRow(repo, now, db)
+  })
+}
+
+/**
+ * Upsert multiple repositories in a single transaction.
+ */
+export function upsertRepositories(repos: RepositoryRow[], db: GroveDb = getDb()) {
+  db.transaction(() => {
+    const now = new Date().toISOString()
+    for (const repo of repos) {
+      upsertRepositoryRow(repo, now, db)
+    }
+  })
+}
+
+function upsertRepositoryRow(repo: RepositoryRow, now: string, db: GroveDb) {
+  const githubId = repo.githubId ?? null
   db.insert(repositories)
     .values({
       fullName: repo.fullName,
@@ -33,6 +68,7 @@ export function upsertRepository(repo: RepositoryRow, db: GroveDb = getDb()) {
       pushedAt: repo.pushedAt ?? null,
       sizeKb: repo.sizeKb ?? null,
       lastObservedAt: now,
+      githubId,
     })
     .onConflictDoUpdate({
       target: repositories.fullName,
@@ -42,43 +78,14 @@ export function upsertRepository(repo: RepositoryRow, db: GroveDb = getDb()) {
         pushedAt: repo.pushedAt ?? null,
         sizeKb: repo.sizeKb ?? null,
         lastObservedAt: now,
+        // Keep a previously observed id when this observation carries none.
+        ...(githubId !== null ? { githubId } : {}),
       },
     })
     .run()
-}
-
-/**
- * Upsert multiple repositories in a single transaction.
- */
-export function upsertRepositories(
-  repos: RepositoryRow[],
-  db: GroveDb = getDb(),
-) {
-  db.transaction((tx) => {
-    const now = new Date().toISOString()
-    for (const repo of repos) {
-      tx.insert(repositories)
-        .values({
-          fullName: repo.fullName,
-          htmlUrl: repo.htmlUrl,
-          defaultBranch: repo.defaultBranch,
-          pushedAt: repo.pushedAt ?? null,
-          sizeKb: repo.sizeKb ?? null,
-          lastObservedAt: now,
-        })
-        .onConflictDoUpdate({
-          target: repositories.fullName,
-          set: {
-            htmlUrl: repo.htmlUrl,
-            defaultBranch: repo.defaultBranch,
-            pushedAt: repo.pushedAt ?? null,
-            sizeKb: repo.sizeKb ?? null,
-            lastObservedAt: now,
-          },
-        })
-        .run()
-    }
-  })
+  if (githubId !== null) {
+    recordObservedBinding(githubId, repo.fullName, now, db, repo.createdAt ?? null)
+  }
 }
 
 /**
@@ -104,6 +111,7 @@ export function recordSnapshot(
     db.insert(ecologySnapshots)
       .values(buildSnapshotValues(ecology, signals, density, now))
       .run()
+    extendBindingForName(ecology.fullName, now.toISOString(), db)
     return true
   })
 }
@@ -127,6 +135,7 @@ export function recordSnapshotBatch(
       db.insert(ecologySnapshots)
         .values(buildSnapshotValues(ecology, signals, density, now))
         .run()
+      extendBindingForName(ecology.fullName, now.toISOString(), db)
     }
   })
 }
@@ -149,11 +158,7 @@ export function getLatestSnapshot(fullName: string, db: GroveDb = getDb()) {
 /**
  * Get snapshot history for a repository, ordered by observed_at DESC.
  */
-export function getSnapshotHistory(
-  fullName: string,
-  limit = 100,
-  db: GroveDb = getDb(),
-) {
+export function getSnapshotHistory(fullName: string, limit = 100, db: GroveDb = getDb()) {
   return db
     .select()
     .from(ecologySnapshots)
@@ -165,15 +170,21 @@ export function getSnapshotHistory(
 
 // ── Internal helpers ──────────────────────────────────────────────
 
-function isWithinInterval(
-  fullName: string,
-  now: Date,
-  db: GroveDb,
-): boolean {
+function isWithinInterval(fullName: string, now: Date, db: GroveDb): boolean {
+  // Only this identity's segment throttles: a name just taken over by
+  // another repository has no snapshot of its own yet.
+  const segmentStart = currentSegmentStart(fullName, db)
   const latest = db
     .select({ observedAt: ecologySnapshots.observedAt })
     .from(ecologySnapshots)
-    .where(eq(ecologySnapshots.fullName, fullName))
+    .where(
+      segmentStart === undefined
+        ? eq(ecologySnapshots.fullName, fullName)
+        : and(
+            eq(ecologySnapshots.fullName, fullName),
+            gte(ecologySnapshots.observedAt, segmentStart),
+          ),
+    )
     .orderBy(desc(ecologySnapshots.observedAt))
     .limit(1)
     .get()
@@ -198,8 +209,7 @@ function buildSnapshotValues(
     role: ecology.declaration?.role ?? null,
     phase: ecology.declaration?.phase ?? null,
     steward: ecology.declaration?.steward ?? null,
-    consolidationIntervalDays:
-      ecology.declaration?.consolidation_interval_days ?? null,
+    consolidationIntervalDays: ecology.declaration?.consolidation_interval_days ?? null,
     fileCount: signals?.fileCount ?? null,
     commitsLast30d: signals?.commitsLast30d ?? null,
     commitsLast90d: signals?.commitsLast90d ?? null,
@@ -267,6 +277,61 @@ function deduplicateByDay<T extends { observedAt: string }>(
     seen.add(day)
     result.push(row)
     if (result.length >= limit) break
+  }
+  return result
+}
+
+// ── Calendar-anchored windows ────────────────────────────────────
+
+export type SnapshotRow = typeof ecologySnapshots.$inferSelect
+
+/** A repository to window: by identity when known, otherwise by its current name. */
+export interface WindowSubject {
+  fullName: string
+  githubId?: number
+}
+
+/**
+ * §4.1 — One calendar window per repository: `days` consecutive UTC days
+ * ending at `endDay` (inclusive), most recent first, one slot per day.
+ * Days without an observation are explicit (`snapshot: undefined`); a long
+ * absence therefore yields a window of mostly empty slots instead of a
+ * window stitched from whichever days happen to exist.
+ *
+ * When the subject's identity has bindings, rows are gathered across every
+ * name bound to it and only within those bounds — never past them, so a
+ * reused name cannot lend another identity's rows. Only an identity with
+ * no binding at all falls back to its current name.
+ */
+export function getPortfolioCalendarWindow(
+  subjects: WindowSubject[],
+  endDay: string,
+  days: number,
+  db: GroveDb = getDb(),
+): Map<string, CalendarSlot<SnapshotRow>[]> {
+  const safeDays = Math.max(0, Math.floor(days))
+  const since = `${shiftDay(endDay, -(safeDays - 1))}T00:00:00.000Z`
+  const result = new Map<string, CalendarSlot<SnapshotRow>[]>()
+
+  for (const subject of subjects) {
+    const bound =
+      subject.githubId !== undefined &&
+      getBindingsForIdentity(subject.githubId, db).length > 0
+    const rows = bound
+      ? getSnapshotHistoryForIdentity(subject.githubId as number, { since }, db)
+      : db
+          .select()
+          .from(ecologySnapshots)
+          .where(
+            and(
+              eq(ecologySnapshots.fullName, subject.fullName),
+              gte(ecologySnapshots.observedAt, since),
+            ),
+          )
+          .orderBy(desc(ecologySnapshots.observedAt))
+          .all()
+
+    result.set(subject.fullName, buildCalendarWindow(rows, endDay, safeDays))
   }
   return result
 }

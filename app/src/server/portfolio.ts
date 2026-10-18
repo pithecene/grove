@@ -28,6 +28,7 @@ import {
   evaluatePortfolioProposals,
 } from './ecosystem-triggers'
 import { getStewardIdentity, isConfigured } from './identity'
+import { applyScope, parseScope } from './scope'
 
 const BATCH_SIZE = 10
 
@@ -54,7 +55,11 @@ export const loadPortfolio = createServerFn({ method: 'GET' }).handler(
     }
 
     const token = identity.token
-    const repos = await fetchUserRepos(token)
+    // Explicit, private selection of what to observe (GROVE_SCOPE_*).
+    // Repositories outside the scope are not enumerated further and nothing
+    // previously recorded about them is touched.
+    const repos = applyScope(await fetchUserRepos(token), parseScope())
+    const idByName = new Map(repos.map((r) => [r.full_name, r.id]))
 
     // Phase 1: Classify in batches
     const classified: RepositoryEcology[] = []
@@ -135,6 +140,8 @@ export const loadPortfolio = createServerFn({ method: 'GET' }).handler(
         defaultBranch: r.default_branch,
         pushedAt: r.pushed_at,
         sizeKb: r.size,
+        githubId: r.id,
+        createdAt: r.created_at,
       })),
     )
 
@@ -155,14 +162,20 @@ export const loadPortfolio = createServerFn({ method: 'GET' }).handler(
     }
 
     const climate = getCurrentClimate(identity.id)
+    // Windows follow identity across renames; the id travels alongside the
+    // ecology for evaluation only.
+    const subjects = repositories.map((r) => ({
+      ...r,
+      githubId: idByName.get(r.fullName),
+    }))
     const ecosystemTriggers = evaluatePortfolioEcosystemTriggers(
       climate,
-      repositories,
+      subjects,
     )
 
     // §5.4 — Evaluate proposal escalation (requires declared climate)
     const climateProposal = climate
-      ? evaluatePortfolioProposals(climate, repositories, identity.id)
+      ? evaluatePortfolioProposals(climate, subjects, identity.id)
       : undefined
 
     return {

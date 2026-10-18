@@ -1,7 +1,16 @@
+import type { BindingRow } from './db/bindings'
 import type { declarationChanges, ecologySnapshots } from './db/schema'
 
 type SnapshotRow = typeof ecologySnapshots.$inferSelect
 type DeclarationRow = typeof declarationChanges.$inferSelect
+
+/**
+ * Consecutive observations further apart than this are shown as a span
+ * that was not observed. Matches one persistence window (§4.1).
+ */
+export const OBSERVATION_GAP_DAYS = 14
+
+const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 export type TimelineEntry =
   | {
@@ -24,6 +33,30 @@ export type TimelineEntry =
       observedAt: string
       changes: Array<{ field: string; from: string | null; to: string | null }>
     }
+  | {
+      /** No observation between `lastObservedAt` and `observedAt` (the resumption). */
+      kind: 'observation_gap'
+      observedAt: string
+      lastObservedAt: string
+      days: number
+    }
+  | {
+      /**
+       * The identity was observed under a new name. The rename happened
+       * somewhere between `lastSeenUnderPrevious` and `observedAt`; the
+       * exact moment is not observed.
+       */
+      kind: 'name_change'
+      observedAt: string
+      fromName: string
+      toName: string
+      lastSeenUnderPrevious: string
+    }
+
+export interface TimelineIdentity {
+  /** Bindings of the identity, any order */
+  bindings: BindingRow[]
+}
 
 /**
  * Build a structural timeline from snapshot and declaration history.
@@ -35,12 +68,14 @@ export type TimelineEntry =
  *   history for this repo (i.e. rows returned < limit). When false, the
  *   earliest entry in the window is not necessarily the first-ever
  *   observation, so "first observed" framing is suppressed.
+ * @param identity - when given, name changes between bindings are emitted.
  */
 export function buildTimeline(
   snapshotsDesc: SnapshotRow[],
   declarationsDesc: DeclarationRow[],
   freshSnapshotRecorded: boolean,
   historyComplete: boolean,
+  identity?: TimelineIdentity,
 ): TimelineEntry[] {
   const densityEntries = buildDensityEntries(snapshotsDesc, historyComplete)
 
@@ -54,13 +89,95 @@ export function buildTimeline(
   }
 
   const declarationEntries = buildDeclarationEntries(declarationsDesc)
+  const gapEntries = buildGapEntries(snapshotsDesc, declarationsDesc)
+  const nameEntries = identity ? buildNameChangeEntries(identity.bindings) : []
 
-  // Merge both lists chronologically DESC (most recent first)
-  const merged = [...densityEntries, ...declarationEntries].sort(
-    (a, b) => b.observedAt.localeCompare(a.observedAt),
-  )
+  // Merge chronologically DESC (most recent first). On equal timestamps a
+  // gap sorts after (older than) the observation that ended it.
+  const merged = [
+    ...densityEntries,
+    ...declarationEntries,
+    ...gapEntries,
+    ...nameEntries,
+  ].sort((a, b) => {
+    const byTime = b.observedAt.localeCompare(a.observedAt)
+    if (byTime !== 0) return byTime
+    return rank(a) - rank(b)
+  })
 
   return merged
+}
+
+function rank(entry: TimelineEntry): number {
+  switch (entry.kind) {
+    case 'observation_gap':
+      return 2
+    case 'name_change':
+      return 1
+    default:
+      return 0
+  }
+}
+
+// ── Observation gaps ──────────────────────────────────────────────
+
+/**
+ * Emit one entry per span of OBSERVATION_GAP_DAYS or more between
+ * consecutive observations. A span without observation is reported as
+ * exactly that — not as inactivity, not as stability.
+ *
+ * A recorded declaration change is an observation too (it is written when
+ * the repository was looked at, whether or not a snapshot was throttled),
+ * so both histories bound the spans.
+ */
+export function buildGapEntries(
+  snapshotsDesc: SnapshotRow[],
+  declarationsDesc: DeclarationRow[] = [],
+): TimelineEntry[] {
+  const instants = [
+    ...new Set([
+      ...snapshotsDesc.map((s) => s.observedAt),
+      ...declarationsDesc.map((d) => d.observedAt),
+    ]),
+  ].sort()
+  const entries: TimelineEntry[] = []
+  for (let i = 1; i < instants.length; i++) {
+    const prev = instants[i - 1]
+    const curr = instants[i]
+    const ms = new Date(curr).getTime() - new Date(prev).getTime()
+    const days = Math.floor(ms / MS_PER_DAY)
+    if (days >= OBSERVATION_GAP_DAYS) {
+      entries.push({
+        kind: 'observation_gap',
+        observedAt: curr,
+        lastObservedAt: prev,
+        days,
+      })
+    }
+  }
+  return entries
+}
+
+// ── Name changes ──────────────────────────────────────────────────
+
+function buildNameChangeEntries(bindings: BindingRow[]): TimelineEntry[] {
+  const ordered = [...bindings].sort((a, b) =>
+    a.firstObservedAt.localeCompare(b.firstObservedAt),
+  )
+  const entries: TimelineEntry[] = []
+  for (let i = 1; i < ordered.length; i++) {
+    const prev = ordered[i - 1]
+    const curr = ordered[i]
+    if (prev.fullName === curr.fullName) continue
+    entries.push({
+      kind: 'name_change',
+      observedAt: curr.firstObservedAt,
+      fromName: prev.fullName,
+      toName: curr.fullName,
+      lastSeenUnderPrevious: prev.lastObservedAt,
+    })
+  }
+  return entries
 }
 
 // ── Density entries ──────────────────────────────────────────────
@@ -156,9 +273,7 @@ const TRACKED_FIELDS = [
   'consolidationIntervalDays',
 ] as const
 
-function buildDeclarationEntries(
-  declarationsDesc: DeclarationRow[],
-): TimelineEntry[] {
+function buildDeclarationEntries(declarationsDesc: DeclarationRow[]): TimelineEntry[] {
   // Reverse to ascending order for walk
   const asc = [...declarationsDesc].reverse()
 
@@ -191,7 +306,9 @@ function buildDeclarationEntries(
   return entries
 }
 
-function fieldToString(value: string | number | boolean | null | undefined): string | null {
+function fieldToString(
+  value: string | number | boolean | null | undefined,
+): string | null {
   if (value == null) return null
   return String(value)
 }

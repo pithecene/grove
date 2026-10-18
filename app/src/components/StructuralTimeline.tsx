@@ -105,7 +105,53 @@ function TimelineEntryView({ entry }: { entry: TimelineEntry }) {
       return <DensitySpanView entry={entry} />
     case 'declaration_change':
       return <DeclarationChangeView entry={entry} />
+    case 'observation_gap':
+      return <ObservationGapView entry={entry} />
+    case 'name_change':
+      return <NameChangeView entry={entry} />
   }
+}
+
+function ObservationGapView({
+  entry,
+}: {
+  entry: Extract<TimelineEntry, { kind: 'observation_gap' }>
+}) {
+  return (
+    <div>
+      <div
+        className="text-xs"
+        style={{ color: 'var(--grove-text-muted)', opacity: 0.7 }}
+      >
+        Not observed &mdash; {formatDate(entry.lastObservedAt)} through{' '}
+        {formatDate(entry.observedAt)} ({entry.days} days without observation)
+      </div>
+    </div>
+  )
+}
+
+function NameChangeView({
+  entry,
+}: {
+  entry: Extract<TimelineEntry, { kind: 'name_change' }>
+}) {
+  return (
+    <div>
+      <div
+        className="text-xs opacity-60"
+        style={{ color: 'var(--grove-text-muted)' }}
+      >
+        {formatDate(entry.observedAt)}
+      </div>
+      <div className="text-sm" style={{ color: 'var(--grove-text)' }}>
+        Observed under a new name: {entry.toName}
+      </div>
+      <div className="text-xs" style={{ color: 'var(--grove-text-muted)' }}>
+        previously {entry.fromName}, last seen under that name{' '}
+        {formatDate(entry.lastSeenUnderPrevious)}
+      </div>
+    </div>
+  )
 }
 
 function DensityTransitionView({
