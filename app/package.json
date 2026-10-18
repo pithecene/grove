@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite dev --port 3000",
     "build": "vite build",
-    "start": "vite start",
+    "start": "NITRO_HOST=${NITRO_HOST:-127.0.0.1} node .output/server/index.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
