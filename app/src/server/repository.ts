@@ -50,7 +50,7 @@ export interface RepositoryDetail {
 }
 
 export const loadRepository = createServerFn({ method: 'GET' })
-  .inputValidator((data: { owner: string; name: string }) => data)
+  .validator((data: { owner: string; name: string }) => data)
   .handler(async ({ data }): Promise<RepositoryDetail> => {
     const identity = await getStewardIdentity()
 
