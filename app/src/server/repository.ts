@@ -27,13 +27,15 @@ import {
 import { createServerFn } from '@tanstack/react-start'
 
 import {
-  getDeclarationHistory,
-  getSnapshotHistory,
+  getBindingsForIdentity,
+  getDeclarationHistoryForIdentity,
+  getSnapshotHistoryForIdentity,
   recordDeclarationIfChanged,
   recordSnapshot,
   upsertRepository,
 } from './db'
 import { getStewardIdentity } from './identity'
+import { isWithinScope, parseScope } from './scope'
 import type { TimelineEntry } from './timeline'
 import { buildTimeline } from './timeline'
 
@@ -51,7 +53,7 @@ export interface RepositoryDetail {
 
 export const loadRepository = createServerFn({ method: 'GET' })
   .validator((data: { owner: string; name: string }) => data)
-  .handler(async ({ data }): Promise<RepositoryDetail> => {
+  .handler(async ({ data }): Promise<RepositoryDetail | undefined> => {
     const identity = await getStewardIdentity()
 
     if (!identity) {
@@ -60,8 +62,16 @@ export const loadRepository = createServerFn({ method: 'GET' })
 
     const token = identity.token
 
+    const scope = parseScope()
     const fullName = `${data.owner}/${data.name}`
+    // Outside the selected scope nothing is fetched or recorded.
+    if (!isWithinScope(fullName, scope)) return undefined
+
     const repo = await fetchRepository(token, fullName)
+    // GitHub follows renames/transfers with a redirect: the resolved
+    // repository may live outside the scope even when the requested name
+    // did not. Nothing about it is classified or recorded in that case.
+    if (!isWithinScope(repo.full_name, scope)) return undefined
 
     // Classify and fetch structural signals in parallel.
     // Entanglement (ecosystemRepoNames) is omitted here: it is a
@@ -94,6 +104,8 @@ export const loadRepository = createServerFn({ method: 'GET' })
       defaultBranch: repo.default_branch,
       pushedAt: repo.pushed_at,
       sizeKb: repo.size,
+      githubId: repo.id,
+      createdAt: repo.created_at,
     })
 
     const enrichedEcology = { ...ecology, density }
@@ -104,20 +116,29 @@ export const loadRepository = createServerFn({ method: 'GET' })
       ecology.classified,
     )
 
-    // Build structural timeline from persisted history.
+    // Build structural timeline from persisted history, followed across every
+    // name this identity was observed under (the live binding was recorded by
+    // the upsert above, so the current name is always included).
     // Fetch one extra row to distinguish "exactly at limit" from "truncated".
     const HISTORY_LIMIT = 50
-    const snapshotRows = getSnapshotHistory(fullName, HISTORY_LIMIT + 1)
-    const declarationRows = getDeclarationHistory(fullName, HISTORY_LIMIT + 1)
+    const snapshotRows = getSnapshotHistoryForIdentity(repo.id, { limit: HISTORY_LIMIT + 1 })
+    const declarationRows = getDeclarationHistoryForIdentity(repo.id, HISTORY_LIMIT + 1)
     const historyComplete = snapshotRows.length <= HISTORY_LIMIT
+    const declarationHistoryComplete = declarationRows.length <= HISTORY_LIMIT
     const snapshots = snapshotRows.slice(0, HISTORY_LIMIT)
     const declarations = declarationRows.slice(0, HISTORY_LIMIT)
-    const timeline = buildTimeline(snapshots, declarations, snapshotWasRecorded, historyComplete)
+    const timeline = buildTimeline(
+      snapshots,
+      declarations,
+      snapshotWasRecorded,
+      historyComplete,
+      { bindings: getBindingsForIdentity(repo.id) },
+      declarationHistoryComplete,
+    )
 
     // Observe phase duration from declaration history (uses already-fetched rows).
     // If all fetched rows share the current phase, the true start may predate
     // the fetch window — suppress the observation to avoid understating duration.
-    const declarationHistoryComplete = declarationRows.length <= HISTORY_LIMIT
     const phaseLastDeclaredAt = findPhaseDeclarationTimestamp(
       ecology.declaration?.phase,
       declarationRows,

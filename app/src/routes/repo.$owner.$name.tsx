@@ -21,17 +21,17 @@ export const Route = createFileRoute('/repo/$owner/$name')({
     // unauthenticated state the portfolio page shows instead of throwing.
     const session = await getSession()
     if (!session.authenticated) {
-      return { session, detail: undefined }
+      return { session, detail: undefined, outOfScope: false }
     }
     const detail = await loadRepository({
       data: { owner: params.owner, name: params.name },
     })
-    return { session, detail }
+    return { session, detail, outOfScope: detail === undefined }
   },
 })
 
 function RepositoryDetailPage() {
-  const { session, detail } = Route.useLoaderData()
+  const { session, detail, outOfScope } = Route.useLoaderData()
 
   if (!session.authenticated) {
     return (
@@ -42,7 +42,9 @@ function RepositoryDetailPage() {
     )
   }
 
-  if (!detail) {
+  // The loader returns no detail only for a repository outside the
+  // selected scope (a missing or inaccessible repository throws).
+  if (!detail || outOfScope) {
     return (
       <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
         <Header login={session.login} />
@@ -55,7 +57,7 @@ function RepositoryDetailPage() {
             &larr; Portfolio
           </Link>
           <p className="text-sm" style={{ color: 'var(--grove-text-muted)' }}>
-            This repository was not found or is not accessible with the configured token.
+            This repository is outside the selected portfolio scope.
           </p>
         </main>
       </div>
