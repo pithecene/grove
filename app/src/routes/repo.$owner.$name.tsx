@@ -5,6 +5,7 @@ import { CapabilityDisplay } from '../components/CapabilityDisplay'
 import { ConsolidationDisplay } from '../components/ConsolidationDisplay'
 import { DensityDisplay } from '../components/DensityDisplay'
 import { DriftDisplay } from '../components/DriftDisplay'
+import { EmptyState } from '../components/EmptyState'
 import { Header } from '../components/Header'
 import { StructuralTimeline } from '../components/StructuralTimeline'
 import { PhaseIndicator } from '../components/PhaseIndicator'
@@ -15,18 +16,32 @@ import { loadRepository } from '../server/repository'
 export const Route = createFileRoute('/repo/$owner/$name')({
   component: RepositoryDetailPage,
   loader: async ({ params }) => {
-    const [session, detail] = await Promise.all([
-      getSession(),
-      loadRepository({
-        data: { owner: params.owner, name: params.name },
-      }),
-    ])
+    // Resolve the session first: with no token, or an invalid/expired one,
+    // the repository loader cannot observe anything. Degrade to the same
+    // unauthenticated state the portfolio page shows instead of throwing.
+    const session = await getSession()
+    if (!session.authenticated) {
+      return { session, detail: undefined }
+    }
+    const detail = await loadRepository({
+      data: { owner: params.owner, name: params.name },
+    })
     return { session, detail }
   },
 })
 
 function RepositoryDetailPage() {
   const { session, detail } = Route.useLoaderData()
+
+  if (!session.authenticated || !detail) {
+    return (
+      <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
+        <Header />
+        <EmptyState />
+      </div>
+    )
+  }
+
   const { ecology, consolidation, phaseDuration, shapeDrift, motionDrift, accessibility, capability, ritualInvitations, timeline } = detail
 
   const seasonAttr = ecology.season?.season
