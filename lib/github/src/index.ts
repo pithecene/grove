@@ -5,6 +5,7 @@ export {
   fetchUserRepos,
   GitHubApiError,
   isRateLimitResponse,
+  resolveRepositoryByName,
 } from './client'
 export { fetchStructuralSignals } from './signals'
-export type { GitHubRepo } from './types'
+export type { GitHubRepo, RepositoryResolution } from './types'

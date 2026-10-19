@@ -2,7 +2,9 @@ import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core'
 
 /**
  * Reference table — upserted on sync.
- * Tracks the last-observed state of each GitHub repository.
+ * Tracks the last-observed state of each GitHub repository *name*.
+ * Names are mutable; `github_id` is the immutable identity observed under
+ * this name most recently (null for rows recorded before identity tracking).
  */
 export const repositories = sqliteTable('repositories', {
   fullName: text('full_name').primaryKey(),
@@ -11,6 +13,60 @@ export const repositories = sqliteTable('repositories', {
   pushedAt: text('pushed_at'),
   sizeKb: integer('size_kb'),
   lastObservedAt: text('last_observed_at').notNull(),
+  githubId: integer('github_id'),
+})
+
+/**
+ * Time-bound binding of a repository name to an immutable GitHub id.
+ *
+ * History rows stay keyed by the name they were observed under; a binding
+ * says which identity that name denoted between `first_observed_at` and
+ * `last_observed_at`. A rename yields a second binding for the same id;
+ * a reused name yields a second binding for the same name; an identity
+ * that returns to a former name yields a further time segment. Original
+ * observations are never rewritten.
+ *
+ * method: 'observed' (id captured live at observation time) or
+ * 'github_redirect' (historical name resolved later through the API;
+ * `evidence` records what GitHub answered and when).
+ */
+export const repositoryBindings = sqliteTable(
+  'repository_bindings',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    githubId: integer('github_id').notNull(),
+    fullName: text('full_name')
+      .notNull()
+      .references(() => repositories.fullName),
+    firstObservedAt: text('first_observed_at').notNull(),
+    lastObservedAt: text('last_observed_at').notNull(),
+    method: text('method').notNull(),
+    resolvedAt: text('resolved_at').notNull(),
+    evidence: text('evidence'),
+  },
+  (table) => [
+    // Not unique: an identity that returns to a name it held before gets a
+    // new time segment rather than one binding spanning another identity's.
+    index('idx_bindings_identity').on(table.githubId, table.fullName),
+    index('idx_bindings_name').on(table.fullName),
+  ],
+)
+
+/**
+ * Outcome of the most recent attempt to resolve a historical name.
+ * Keeps unresolved names visible as unresolved — a 404 is recorded as
+ * "not found or not accessible", never as deletion.
+ */
+export const identityResolutions = sqliteTable('identity_resolutions', {
+  fullName: text('full_name')
+    .primaryKey()
+    .references(() => repositories.fullName),
+  attemptedAt: text('attempted_at').notNull(),
+  outcome: text('outcome').notNull(),
+  httpStatus: integer('http_status'),
+  githubId: integer('github_id'),
+  resolvedFullName: text('resolved_full_name'),
+  evidence: text('evidence'),
 })
 
 /**
@@ -107,4 +163,12 @@ export const climateProposals = sqliteTable('climate_proposals', {
   proposedAt: text('proposed_at').notNull(),
   respondedAt: text('responded_at'),
   stewardId: integer('steward_id'),
+  /** Last evaluation whose window carried enough evidence and reproduced the pattern */
+  lastSupportedAt: text('last_supported_at'),
+  /**
+   * JSON array of `{ fullName, githubId? }` — the repositories whose
+   * persistence the proposal drew on. A later evaluation can only call the
+   * pattern reversed when every one of them is present and observed enough.
+   */
+  sourceRepositories: text('source_repositories'),
 })

@@ -28,13 +28,15 @@ import {
 import { createServerFn } from '@tanstack/react-start'
 
 import {
-  getDeclarationHistory,
-  getSnapshotHistory,
+  getBindingsForIdentity,
+  getDeclarationHistoryForIdentity,
+  getSnapshotHistoryForIdentity,
   recordDeclarationIfChanged,
   recordSnapshot,
   upsertRepository,
 } from './db'
 import { getStewardIdentity, invalidateStewardIdentity } from './identity'
+import { isWithinScope, parseScope } from './scope'
 import type { TimelineEntry } from './timeline'
 import { buildTimeline } from './timeline'
 
@@ -62,6 +64,8 @@ export type RepositoryLookup =
   | { kind: 'unavailable'; status?: number }
   /** The token was accepted at the session check but refused on this request (401) */
   | { kind: 'token_rejected' }
+  /** The repository is outside the selected portfolio scope; nothing fetched or recorded */
+  | { kind: 'out_of_scope' }
 
 /**
  * Map a failed GitHub request to what the page can state. Anything that is
@@ -103,13 +107,21 @@ export const loadRepository = createServerFn({ method: 'GET' })
 
     const token = identity.token
 
+    const scope = parseScope()
     const fullName = `${data.owner}/${data.name}`
+    // Outside the selected scope nothing is fetched or recorded.
+    if (!isWithinScope(fullName, scope)) return { kind: 'out_of_scope' }
+
     let repo: Awaited<ReturnType<typeof fetchRepository>>
     try {
       repo = await fetchRepository(token, fullName)
     } catch (err: unknown) {
       return lookupFailure(err, fullName)
     }
+    // GitHub follows renames/transfers with a redirect: the resolved
+    // repository may live outside the scope even when the requested name
+    // did not. Nothing about it is classified or recorded in that case.
+    if (!isWithinScope(repo.full_name, scope)) return { kind: 'out_of_scope' }
 
     // Classify and fetch structural signals in parallel.
     // Entanglement (ecosystemRepoNames) is omitted here: it is a
@@ -150,6 +162,8 @@ export const loadRepository = createServerFn({ method: 'GET' })
       defaultBranch: repo.default_branch,
       pushedAt: repo.pushed_at,
       sizeKb: repo.size,
+      githubId: repo.id,
+      createdAt: repo.created_at,
     })
 
     const enrichedEcology = { ...ecology, density }
@@ -160,20 +174,29 @@ export const loadRepository = createServerFn({ method: 'GET' })
       ecology.classified,
     )
 
-    // Build structural timeline from persisted history.
+    // Build structural timeline from persisted history, followed across every
+    // name this identity was observed under (the live binding was recorded by
+    // the upsert above, so the current name is always included).
     // Fetch one extra row to distinguish "exactly at limit" from "truncated".
     const HISTORY_LIMIT = 50
-    const snapshotRows = getSnapshotHistory(fullName, HISTORY_LIMIT + 1)
-    const declarationRows = getDeclarationHistory(fullName, HISTORY_LIMIT + 1)
+    const snapshotRows = getSnapshotHistoryForIdentity(repo.id, { limit: HISTORY_LIMIT + 1 })
+    const declarationRows = getDeclarationHistoryForIdentity(repo.id, HISTORY_LIMIT + 1)
     const historyComplete = snapshotRows.length <= HISTORY_LIMIT
+    const declarationHistoryComplete = declarationRows.length <= HISTORY_LIMIT
     const snapshots = snapshotRows.slice(0, HISTORY_LIMIT)
     const declarations = declarationRows.slice(0, HISTORY_LIMIT)
-    const timeline = buildTimeline(snapshots, declarations, snapshotWasRecorded, historyComplete)
+    const timeline = buildTimeline(
+      snapshots,
+      declarations,
+      snapshotWasRecorded,
+      historyComplete,
+      { bindings: getBindingsForIdentity(repo.id) },
+      declarationHistoryComplete,
+    )
 
     // Observe phase duration from declaration history (uses already-fetched rows).
     // If all fetched rows share the current phase, the true start may predate
     // the fetch window — suppress the observation to avoid understating duration.
-    const declarationHistoryComplete = declarationRows.length <= HISTORY_LIMIT
     const phaseLastDeclaredAt = findPhaseDeclarationTimestamp(
       ecology.declaration?.phase,
       declarationRows,

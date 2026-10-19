@@ -1,6 +1,18 @@
-import type { GitHubRepo } from './types'
+import type { GitHubRepo, RepositoryResolution } from './types'
 
 const GITHUB_API = 'https://api.github.com'
+
+function toRepo(r: GitHubRepo): GitHubRepo {
+  return {
+    id: r.id,
+    full_name: r.full_name,
+    html_url: r.html_url,
+    default_branch: r.default_branch,
+    pushed_at: r.pushed_at,
+    size: r.size,
+    created_at: r.created_at ?? null,
+  }
+}
 
 /**
  * Fetch all repositories accessible to the authenticated user.
@@ -31,15 +43,7 @@ export async function fetchUserRepos(token: string): Promise<GitHubRepo[]> {
     const data: GitHubRepo[] = await response.json()
     if (data.length === 0) break
 
-    repos.push(
-      ...data.map((r) => ({
-        full_name: r.full_name,
-        html_url: r.html_url,
-        default_branch: r.default_branch,
-        pushed_at: r.pushed_at,
-        size: r.size,
-      })),
-    )
+    repos.push(...data.map(toRepo))
 
     if (data.length < perPage) break
     page++
@@ -97,13 +101,49 @@ export async function fetchRepository(
   }
 
   const r: GitHubRepo = await response.json()
-  return {
-    full_name: r.full_name,
-    html_url: r.html_url,
-    default_branch: r.default_branch,
-    pushed_at: r.pushed_at,
-    size: r.size,
+  return toRepo(r)
+}
+
+/**
+ * Resolve a repository name to its current identity without throwing.
+ *
+ * GitHub answers a renamed or transferred repository with a redirect that
+ * `fetch` follows, so the returned repo may carry a different `full_name`
+ * than requested — that pair is the evidence for an identity binding.
+ * A 404 is reported as `not_found`: it may mean deleted, renamed without a
+ * redirect, or simply not visible to this token. Callers must not treat
+ * it as deletion.
+ */
+export async function resolveRepositoryByName(
+  token: string,
+  fullName: string,
+): Promise<RepositoryResolution> {
+  let response: Response
+  try {
+    response = await fetch(`${GITHUB_API}/repos/${fullName}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: 'application/vnd.github+json',
+      },
+    })
+  } catch (err) {
+    return { outcome: 'error', status: 0, message: String(err) }
   }
+
+  if (response.status === 404) return { outcome: 'not_found', status: 404 }
+  if (response.status === 401 || response.status === 403) {
+    return { outcome: 'forbidden', status: response.status }
+  }
+  if (!response.ok) {
+    return {
+      outcome: 'error',
+      status: response.status,
+      message: response.statusText,
+    }
+  }
+
+  const r: GitHubRepo = await response.json()
+  return { outcome: 'resolved', status: response.status, repo: toRepo(r) }
 }
 
 /**

@@ -59,12 +59,14 @@ export function buildRepoPersistenceContext(
 export function evaluateEcosystemTriggers(
   contexts: RepoPersistenceContext[],
 ): EcosystemTriggerResult {
-  // Defense-in-depth: only contexts with a complete persistence window
-  // participate in trigger evaluation. Incomplete windows should never
-  // have persistentlyAligned/Divergent set (assessPersistence guards this),
-  // but we enforce it here to prevent malformed contexts from triggering.
+  // Defense-in-depth: only contexts whose window spans the full 14 calendar
+  // days and carries enough observed days to reach the threshold take part.
+  // Insufficient windows should never have persistentlyAligned/Divergent set
+  // (assessPersistence guards this); enforced here against malformed contexts.
   const valid = contexts.filter(
-    (ctx) => ctx.persistence.totalSnapshots >= PERSISTENCE_WINDOW_SIZE,
+    (ctx) =>
+      ctx.persistence.windowDays >= PERSISTENCE_WINDOW_SIZE &&
+      ctx.persistence.evidence !== 'insufficient',
   )
 
   // Partition by stratum

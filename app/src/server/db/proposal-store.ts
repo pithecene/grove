@@ -18,6 +18,49 @@ export interface StoredProposal {
   proposedAt: string
   respondedAt: string | null
   stewardId: number | null
+  /** Last evaluation whose window carried enough evidence and reproduced the pattern */
+  lastSupportedAt: string | null
+  /** JSON array of `{ fullName, githubId? }` the proposal drew on; null for proposals recorded before this was tracked */
+  sourceRepositories: string | null
+}
+
+/** A repository whose persistence a proposal drew on. */
+export interface ProposalSource {
+  fullName: string
+  githubId?: number
+}
+
+/** Parse the stored source list; undefined when the proposal predates source tracking. */
+export function parseProposalSources(
+  stored: string | null,
+): ProposalSource[] | undefined {
+  if (!stored) return undefined
+  try {
+    const parsed = JSON.parse(stored) as unknown
+    if (!Array.isArray(parsed)) return undefined
+    return parsed.filter(
+      (s): s is ProposalSource =>
+        typeof s === 'object' && s !== null && typeof s.fullName === 'string',
+    )
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Record that an evaluation with sufficient evidence reproduced the pattern
+ * behind the active proposal. Evaluations without evidence never call this,
+ * so `last_supported_at` is an honest "last seen", not a heartbeat.
+ */
+export function markProposalSupported(
+  proposalId: number,
+  supportedAt: string,
+  db: GroveDb = getDb(),
+) {
+  db.update(climateProposals)
+    .set({ lastSupportedAt: supportedAt })
+    .where(eq(climateProposals.id, proposalId))
+    .run()
 }
 
 /**
@@ -56,6 +99,7 @@ export function persistProposal(
   observation: string,
   stewardId: number,
   db: GroveDb = getDb(),
+  sources?: ProposalSource[],
 ) {
   db.transaction((tx) => {
     // Withdraw any existing active proposal for this steward
@@ -90,6 +134,8 @@ export function persistProposal(
         status: 'active',
         proposedAt: new Date().toISOString(),
         stewardId,
+        lastSupportedAt: new Date().toISOString(),
+        sourceRepositories: sources ? JSON.stringify(sources) : null,
       })
       .run()
   })
@@ -156,10 +202,7 @@ export function dismissProposal(
       respondedAt: new Date().toISOString(),
     })
     .where(
-      and(
-        eq(climateProposals.id, proposalId),
-        eq(climateProposals.stewardId, stewardId),
-      ),
+      and(eq(climateProposals.id, proposalId), eq(climateProposals.stewardId, stewardId)),
     )
     .run()
 }
@@ -168,10 +211,7 @@ export function dismissProposal(
  * §2.3 — Withdraw a proposal when the underlying pattern reverses.
  * Scoped to the specific steward's active proposal.
  */
-export function withdrawActiveProposal(
-  stewardId: number,
-  db: GroveDb = getDb(),
-) {
+export function withdrawActiveProposal(stewardId: number, db: GroveDb = getDb()) {
   const active = getActiveProposal(stewardId, db)
   if (!active) return
 

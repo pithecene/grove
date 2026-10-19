@@ -66,9 +66,11 @@ function RepositoryDetailPage() {
             &larr; Portfolio
           </Link>
           <p className="text-sm" style={{ color: 'var(--grove-text-muted)' }}>
-            {lookup.kind === 'not_accessible'
-              ? 'This repository was not found or is not accessible with the configured token.'
-              : 'GitHub gave no usable answer for this repository this time (unreachable, unavailable or rate-limited). Nothing was observed.'}
+            {lookup.kind === 'out_of_scope'
+              ? 'This repository is outside the selected portfolio scope.'
+              : lookup.kind === 'not_accessible'
+                ? 'This repository was not found or is not accessible with the configured token.'
+                : 'GitHub gave no usable answer for this repository this time (unreachable, unavailable or rate-limited). Nothing was observed.'}
           </p>
         </main>
       </div>

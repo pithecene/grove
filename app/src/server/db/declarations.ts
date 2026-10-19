@@ -1,6 +1,7 @@
 import type { GroveDeclaration } from '@grove/core'
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq, gte } from 'drizzle-orm'
 
+import { currentSegmentStart, extendBindingForName } from './bindings'
 import type { GroveDb } from './client'
 import { getDb } from './client'
 import { declarationChanges } from './schema'
@@ -22,33 +23,48 @@ export function recordDeclarationIfChanged(
   db: GroveDb = getDb(),
 ): boolean {
   return db.transaction(() => {
+    // Compare within this identity's segment only: a name taken over by
+    // another repository starts its declaration history afresh, even when
+    // the declaration reads the same.
+    const segmentStart = currentSegmentStart(fullName, db)
     const latest = db
       .select()
       .from(declarationChanges)
-      .where(eq(declarationChanges.fullName, fullName))
+      .where(
+        segmentStart === undefined
+          ? eq(declarationChanges.fullName, fullName)
+          : and(
+              eq(declarationChanges.fullName, fullName),
+              gte(declarationChanges.observedAt, segmentStart),
+            ),
+      )
       .orderBy(desc(declarationChanges.id))
       .limit(1)
       .get()
 
     const current = serializeDeclaration(declaration, classified)
-    if (latest && serializeDeclaration(rowToDeclaration(latest), latest.classified) === current) {
+    if (
+      latest &&
+      serializeDeclaration(rowToDeclaration(latest), latest.classified) === current
+    ) {
       return false
     }
 
+    const observedAt = new Date().toISOString()
     db.insert(declarationChanges)
       .values({
         fullName,
-        observedAt: new Date().toISOString(),
+        observedAt,
         classified,
         intent: declaration?.intent ?? null,
         horizon: declaration?.horizon ?? null,
         role: declaration?.role ?? null,
         phase: declaration?.phase ?? null,
         steward: declaration?.steward ?? null,
-        consolidationIntervalDays:
-          declaration?.consolidation_interval_days ?? null,
+        consolidationIntervalDays: declaration?.consolidation_interval_days ?? null,
       })
       .run()
+    extendBindingForName(fullName, observedAt, db)
 
     return true
   })
@@ -57,10 +73,7 @@ export function recordDeclarationIfChanged(
 /**
  * Get the most recent declaration change for a repository.
  */
-export function getLatestDeclaration(
-  fullName: string,
-  db: GroveDb = getDb(),
-) {
+export function getLatestDeclaration(fullName: string, db: GroveDb = getDb()) {
   return (
     db
       .select()
@@ -101,8 +114,7 @@ function serializeDeclaration(
 ): string {
   return JSON.stringify({
     classified,
-    consolidation_interval_days:
-      declaration?.consolidation_interval_days ?? null,
+    consolidation_interval_days: declaration?.consolidation_interval_days ?? null,
     horizon: declaration?.horizon ?? null,
     intent: declaration?.intent ?? null,
     phase: declaration?.phase ?? null,

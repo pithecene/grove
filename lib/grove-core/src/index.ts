@@ -14,17 +14,25 @@ export {
 } from './drift'
 export {
   assessPersistence,
+  buildCalendarWindow,
   deriveSnapshotRelation,
+  hasDeterminateEvidence,
   PERSISTENCE_THRESHOLD,
   PERSISTENCE_WINDOW_SIZE,
+  relateCalendarWindow,
+  shiftDay,
+  toUtcDay,
 } from './persistence'
+export type { CalendarSlot, SlotRelation } from './persistence'
 export { observePhaseDuration, suggestsReaffirmation } from './phase-duration'
 export {
+  assessProposalEvidence,
   escalatedObservation,
   evaluateClimateProposal,
   meetsProposalConstraints,
   PROPOSAL_MIN_HISTORY_DAYS,
   PROPOSAL_MIN_REPOS,
+  proposalSourceStratum,
   shouldWithdrawProposal,
 } from './proposals'
 export type { ProposalConstraints } from './proposals'
@@ -64,6 +72,7 @@ export type {
   PhaseDurationObservation,
   Portfolio,
   ProposalBasis,
+  ProposalEvidenceState,
   ReferenceSnapshot,
   RepoPersistenceContext,
   RepositoryEcology,
@@ -76,6 +85,7 @@ export type {
   ShapeDriftObservation,
   Stratum,
   StructuralSignals,
+  WindowEvidence,
 } from './types'
 export {
   CLIMATE_RELATIONS,
@@ -85,9 +95,11 @@ export {
   HORIZONS,
   PHASES,
   PROPOSAL_BASES,
+  PROPOSAL_EVIDENCE_STATES,
   RITUALS,
   ROLE_CLASSES,
   ROLES,
   SEASONS,
   STRATA,
+  WINDOW_EVIDENCE,
 } from './types'

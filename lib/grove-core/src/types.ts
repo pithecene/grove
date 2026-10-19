@@ -186,15 +186,35 @@ export interface MotionDriftObservation {
   description: string // single observational sentence
 }
 
+// §4 — how much of a calendar-anchored window was actually observed
+export const WINDOW_EVIDENCE = ['complete', 'partial', 'insufficient'] as const
+export type WindowEvidence = (typeof WINDOW_EVIDENCE)[number]
+
 export interface PersistenceAssessment {
   alignedCount: number
   divergentCount: number
   orthogonalCount: number
+  /** Observed snapshots whose relation could not be derived (e.g. no phase) */
   undeterminedCount: number
+  /** Snapshots actually observed inside the window */
   totalSnapshots: number
+  /** Calendar days the window spans */
+  windowDays: number
+  /** Calendar days inside the window with no observation at all */
+  missingDays: number
+  /**
+   * complete — every day observed; partial — enough observed days that the
+   * threshold is reachable; insufficient — the threshold cannot be reached,
+   * so persistence is undeterminable (not "absent").
+   */
+  evidence: WindowEvidence
   persistentlyAligned: boolean
   persistentlyDivergent: boolean
 }
+
+// §2.3 — relation between a standing proposal and the current window
+export const PROPOSAL_EVIDENCE_STATES = ['supported', 'reversed', 'not_observed'] as const
+export type ProposalEvidenceState = (typeof PROPOSAL_EVIDENCE_STATES)[number]
 
 /** Individual repo persistence context for trigger evaluation */
 export interface RepoPersistenceContext {
@@ -259,6 +279,14 @@ export interface ClimateProposal {
   triggerType: 'core_divergence' | 'core_split' | 'long_arc_drift'
   /** The coherent divergent season observed, if applicable */
   observedSeason?: Season
+  /** When observation last reproduced the pattern behind this proposal (ISO 8601) */
+  lastSupportedAt?: string
+  /**
+   * supported — the current window reproduces the pattern;
+   * not_observed — the current window lacks enough observed days to re-examine it.
+   * A proposal whose pattern reversed is withdrawn and never surfaced.
+   */
+  evidence?: Exclude<ProposalEvidenceState, 'reversed'>
 }
 
 // Classified repository

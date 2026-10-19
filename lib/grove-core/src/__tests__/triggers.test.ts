@@ -102,6 +102,9 @@ function makePersistence(
     orthogonalCount: 0,
     undeterminedCount: 0,
     totalSnapshots: 14,
+    windowDays: 14,
+    missingDays: 0,
+    evidence: 'complete',
     persistentlyAligned: false,
     persistentlyDivergent: false,
     ...overrides,
@@ -468,11 +471,13 @@ describe('evaluateEcosystemTriggers — strata exclusion', () => {
     expect(result.triggered).toBe(false)
   })
 
-  it('incomplete window (totalSnapshots < 14) does not trigger even with divergent flag', () => {
+  it('insufficient window does not trigger even with divergent flag', () => {
     const ctx = makeContext('org/core', 'structural_core', {
       persistentlyDivergent: true,
       divergentCount: 5,
       totalSnapshots: 5,
+      missingDays: 9,
+      evidence: 'insufficient',
     }, 'expansion')
     const result = evaluateEcosystemTriggers([ctx])
 
@@ -488,6 +493,8 @@ describe('evaluateEcosystemTriggers — strata exclusion', () => {
     const incomplete = makeContext('org/core-b', 'structural_core', {
       persistentlyDivergent: true,
       totalSnapshots: 7,
+      missingDays: 7,
+      evidence: 'insufficient',
     }, 'expansion')
     const result = evaluateEcosystemTriggers([aligned, incomplete])
 
@@ -497,11 +504,15 @@ describe('evaluateEcosystemTriggers — strata exclusion', () => {
   it('incomplete window does not contribute to §5.3 drift', () => {
     const b1 = makeContext('org/app1', 'long_arc_domain', {
       persistentlyDivergent: true,
-      totalSnapshots: 10,
+      totalSnapshots: 8,
+      missingDays: 6,
+      evidence: 'insufficient',
     }, 'expansion')
     const b2 = makeContext('org/app2', 'long_arc_domain', {
       persistentlyDivergent: true,
-      totalSnapshots: 10,
+      totalSnapshots: 8,
+      missingDays: 6,
+      evidence: 'insufficient',
     }, 'expansion')
     const result = evaluateEcosystemTriggers([b1, b2])
 

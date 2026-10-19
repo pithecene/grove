@@ -111,10 +111,13 @@ Framework-agnostic logic:
 - Dependency load calculation
 - Ritual eligibility and invitation surfacing
 - Season derivation from phase
+- Calendar-anchored persistence windows (`persistence.ts`) — missing days are explicit
+- Proposal evidence (`proposals.ts`) — supported / reversed / not observed
 
 ### /lib/github
 
 GitHub API client and repo sync logic.
+- `client.ts` — enumeration, `.grove.yaml` fetch, name → identity resolution (follows renames)
 
 ### /app
 
@@ -125,9 +128,14 @@ TanStack Start application layer:
 
 ### /server
 
-Server-side utilities:
-- `auth/` — GitHub OAuth integration
-- `sync/` — Repository loading and classification logic
+Server-side utilities (`app/src/server/`):
+- `identity.ts`, `auth.ts` — steward identity from `GROVE_GITHUB_TOKEN`
+- `portfolio.ts`, `repository.ts` — loading, classification, persistence
+- `scope.ts` — explicit portfolio selection from `GROVE_SCOPE_*` (private to the deployment)
+- `ecosystem-triggers.ts` — calendar-anchored trigger and proposal evaluation
+- `timeline.ts` — structural timeline incl. observation gaps and name changes
+- `db/bindings.ts` — time-bound name ↔ identity bindings; history across renames
+- `identity-backfill.ts` + `app/scripts/identity-backfill.ts` — evidence-backed binding of historical names (dry run by default)
 
 ---
 
