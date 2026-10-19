@@ -33,11 +33,31 @@ export const Route = createFileRoute('/repo/$owner/$name')({
 function RepositoryDetailPage() {
   const { session, detail } = Route.useLoaderData()
 
-  if (!session.authenticated || !detail) {
+  if (!session.authenticated) {
     return (
       <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
         <Header />
-        <EmptyState />
+        <EmptyState reason={session.reason} />
+      </div>
+    )
+  }
+
+  if (!detail) {
+    return (
+      <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
+        <Header login={session.login} />
+        <main className="px-8 py-8">
+          <Link
+            to="/"
+            className="text-sm mb-6 inline-block"
+            style={{ color: 'var(--grove-text-muted)' }}
+          >
+            &larr; Portfolio
+          </Link>
+          <p className="text-sm" style={{ color: 'var(--grove-text-muted)' }}>
+            This repository was not found or is not accessible with the configured token.
+          </p>
+        </main>
       </div>
     )
   }

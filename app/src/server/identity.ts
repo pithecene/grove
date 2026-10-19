@@ -24,22 +24,29 @@ export function isConfigured(): boolean {
   return !!process.env.GROVE_GITHUB_TOKEN
 }
 
-/**
- * Resolve the steward's GitHub identity from the configured token.
- * Fetches `https://api.github.com/user` once, then caches the result
- * in a module-level singleton for the process lifetime.
- *
- * Returns undefined when no token is configured or when the token
- * is invalid/expired — callers degrade to the unauthenticated state
- * rather than crashing route loaders.
- */
-export async function getStewardIdentity(): Promise<
-  StewardIdentity | undefined
-> {
-  const token = getToken()
-  if (!token) return undefined
+/** Why no identity is available; the UI states the actual condition. */
+export type IdentityUnavailableReason =
+  /** GROVE_GITHUB_TOKEN is not set */
+  | 'missing'
+  /** GitHub answered but did not accept the token (401/403, or any non-2xx) */
+  | 'rejected'
+  /** GitHub could not be reached; the token is unverified, not refused */
+  | 'unreachable'
 
-  if (cached && cached.token === token) return cached
+export type IdentityResolution =
+  | { kind: 'resolved'; identity: StewardIdentity }
+  | { kind: 'unavailable'; reason: IdentityUnavailableReason; status?: number }
+
+/**
+ * Resolve the steward's GitHub identity from the configured token, saying
+ * why when it cannot. Fetches `https://api.github.com/user` once, then
+ * caches the result in a module-level singleton for the process lifetime.
+ */
+export async function resolveStewardIdentity(): Promise<IdentityResolution> {
+  const token = getToken()
+  if (!token) return { kind: 'unavailable', reason: 'missing' }
+
+  if (cached && cached.token === token) return { kind: 'resolved', identity: cached }
 
   try {
     const response = await fetch('https://api.github.com/user', {
@@ -53,15 +60,27 @@ export async function getStewardIdentity(): Promise<
       console.warn(
         `[grove] GitHub identity check failed (${response.status}). Check that GROVE_GITHUB_TOKEN is valid.`,
       )
-      return undefined
+      return { kind: 'unavailable', reason: 'rejected', status: response.status }
     }
 
     const user = await response.json()
 
     cached = { token, login: user.login, id: user.id }
-    return cached
+    return { kind: 'resolved', identity: cached }
   } catch (err) {
     console.warn('[grove] Failed to reach GitHub API:', err)
-    return undefined
+    return { kind: 'unavailable', reason: 'unreachable' }
   }
+}
+
+/**
+ * The steward's identity, or undefined when none is available (no token,
+ * a token GitHub refused, or GitHub unreachable) — callers degrade to the
+ * unauthenticated state rather than crashing route loaders.
+ */
+export async function getStewardIdentity(): Promise<
+  StewardIdentity | undefined
+> {
+  const resolution = await resolveStewardIdentity()
+  return resolution.kind === 'resolved' ? resolution.identity : undefined
 }
