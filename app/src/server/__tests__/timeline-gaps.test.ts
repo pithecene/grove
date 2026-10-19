@@ -96,6 +96,29 @@ describe('buildGapEntries', () => {
     expect(buildGapEntries(rows, declarations)).toEqual([])
   })
 
+  it('does not read a gap across the edge of a truncated series', () => {
+    // Snapshots are truncated (oldest retained: Jun 1) while the complete
+    // declaration history still holds a Jan 1 row. The snapshots between
+    // were not fetched, so the interval is unknown, not a span without observation.
+    const rows = [
+      snapshot('2025-06-02T12:00:00.000Z'),
+      snapshot('2025-06-01T12:00:00.000Z'),
+    ]
+    const declarations = [declaration('2025-01-01T12:00:00.000Z')]
+    expect(buildGapEntries(rows, declarations)).toHaveLength(1)
+    expect(buildGapEntries(rows, declarations, { snapshotsComplete: false })).toEqual([])
+    expect(
+      buildTimeline(rows, declarations, false, false).some((e) => e.kind === 'observation_gap'),
+    ).toBe(false)
+    // The converse: a truncated declaration history hides nothing newer than its edge.
+    const older = [snapshot('2025-06-02T12:00:00.000Z'), snapshot('2025-01-01T12:00:00.000Z')]
+    const recent = [declaration('2025-06-01T12:00:00.000Z')]
+    expect(buildGapEntries(older, recent, { declarationsComplete: false })).toEqual([])
+    expect(buildTimeline(older, recent, false, true, undefined, false)).not.toContainEqual(
+      expect.objectContaining({ kind: 'observation_gap' }),
+    )
+  })
+
   it('a declaration observation moves the start of a longer span', () => {
     const rows = [
       snapshot('2025-06-01T12:00:00.000Z'),

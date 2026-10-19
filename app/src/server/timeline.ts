@@ -69,6 +69,8 @@ export interface TimelineIdentity {
  *   earliest entry in the window is not necessarily the first-ever
  *   observation, so "first observed" framing is suppressed.
  * @param identity - when given, name changes between bindings are emitted.
+ * @param declarationsComplete - true when the fetched declaration rows are
+ *   the full declaration history (rows returned < limit).
  */
 export function buildTimeline(
   snapshotsDesc: SnapshotRow[],
@@ -76,6 +78,7 @@ export function buildTimeline(
   freshSnapshotRecorded: boolean,
   historyComplete: boolean,
   identity?: TimelineIdentity,
+  declarationsComplete = true,
 ): TimelineEntry[] {
   const densityEntries = buildDensityEntries(snapshotsDesc, historyComplete)
 
@@ -89,7 +92,10 @@ export function buildTimeline(
   }
 
   const declarationEntries = buildDeclarationEntries(declarationsDesc)
-  const gapEntries = buildGapEntries(snapshotsDesc, declarationsDesc)
+  const gapEntries = buildGapEntries(snapshotsDesc, declarationsDesc, {
+    snapshotsComplete: historyComplete,
+    declarationsComplete,
+  })
   const nameEntries = identity ? buildNameChangeEntries(identity.bindings) : []
 
   // Merge chronologically DESC (most recent first). On equal timestamps a
@@ -129,17 +135,40 @@ function rank(entry: TimelineEntry): number {
  * A recorded declaration change is an observation too (it is written when
  * the repository was looked at, whether or not a snapshot was throttled),
  * so both histories bound the spans.
+ *
+ * A truncated series has no lower edge: its oldest retained row is not the
+ * start of observation, and rows omitted beyond it may fill any interval
+ * older than it. Nothing older than the oldest retained row of a truncated
+ * series is read as a span without observation.
  */
+export interface GapBounds {
+  /** false when older snapshots exist beyond the fetched rows */
+  snapshotsComplete?: boolean
+  /** false when older declaration rows exist beyond the fetched rows */
+  declarationsComplete?: boolean
+}
+
 export function buildGapEntries(
   snapshotsDesc: SnapshotRow[],
   declarationsDesc: DeclarationRow[] = [],
+  bounds: GapBounds = {},
 ): TimelineEntry[] {
+  const edges: string[] = []
+  if (bounds.snapshotsComplete === false && snapshotsDesc.length > 0) {
+    edges.push(snapshotsDesc[snapshotsDesc.length - 1].observedAt)
+  }
+  if (bounds.declarationsComplete === false && declarationsDesc.length > 0) {
+    edges.push(declarationsDesc[declarationsDesc.length - 1].observedAt)
+  }
+  const edge = edges.length > 0 ? edges.reduce((a, b) => (a > b ? a : b)) : undefined
   const instants = [
     ...new Set([
       ...snapshotsDesc.map((s) => s.observedAt),
       ...declarationsDesc.map((d) => d.observedAt),
     ]),
-  ].sort()
+  ]
+    .filter((t) => edge === undefined || t >= edge)
+    .sort()
   const entries: TimelineEntry[] = []
   for (let i = 1; i < instants.length; i++) {
     const prev = instants[i - 1]

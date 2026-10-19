@@ -135,6 +135,53 @@ describe('first binding on a database recorded before identity tracking', () => 
   })
 })
 
+describe('adoption floored by the identity’s own history', () => {
+  it('adopts no rows older than the identity’s last observation under another name', () => {
+    // The name was recorded monthly before identity tracking. The repository
+    // (created in 2024) was observed live under another name in mid-March,
+    // so it cannot have held this name before then — whatever `created_at` says.
+    for (const month of ['01', '02', '03', '04']) {
+      seedSnapshot('orchard/alpha', `2025-${month}-01T12:00:00.000Z`)
+    }
+    seedSnapshot('orchard/beta', '2025-03-15T12:00:00.000Z')
+    recordObservedBinding(100, 'orchard/beta', '2025-03-15T12:00:00.000Z', db)
+    recordObservedBinding(
+      100,
+      'orchard/alpha',
+      '2025-05-01T12:00:00.000Z',
+      db,
+      '2024-01-01T00:00:00.000Z',
+    )
+
+    const alpha = getBindingsForName('orchard/alpha', db)[0]
+    expect(alpha.firstObservedAt).toBe('2025-03-15T12:00:00.000Z')
+    expect(JSON.parse(alpha.evidence ?? '{}')).toMatchObject({
+      adopted_prior_rows: true,
+      floor_basis: 'previous_name_observation',
+      previous_name: 'orchard/beta',
+    })
+    expect(getSnapshotHistoryForIdentity(100, {}, db).map((r) => r.observedAt)).toEqual([
+      '2025-04-01T12:00:00.000Z',
+      '2025-03-15T12:00:00.000Z',
+    ])
+  })
+
+  it('records the creation time as the basis when nothing stronger is known', () => {
+    seedSnapshot('orchard/alpha', '2025-01-01T12:00:00.000Z')
+    seedSnapshot('orchard/alpha', '2025-02-01T12:00:00.000Z')
+    recordObservedBinding(
+      100,
+      'orchard/alpha',
+      '2025-03-01T12:00:00.000Z',
+      db,
+      '2025-01-15T00:00:00.000Z',
+    )
+    const alpha = getBindingsForName('orchard/alpha', db)[0]
+    expect(alpha.firstObservedAt).toBe('2025-01-15T00:00:00.000Z')
+    expect(JSON.parse(alpha.evidence ?? '{}')).toMatchObject({ floor_basis: 'created_at' })
+  })
+})
+
 describe('exact binding bounds', () => {
   it('rows recorded after the binding in the same request extend it', () => {
     upsertRepositories(

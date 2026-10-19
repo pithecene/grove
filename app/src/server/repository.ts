@@ -182,16 +182,21 @@ export const loadRepository = createServerFn({ method: 'GET' })
     const snapshotRows = getSnapshotHistoryForIdentity(repo.id, { limit: HISTORY_LIMIT + 1 })
     const declarationRows = getDeclarationHistoryForIdentity(repo.id, HISTORY_LIMIT + 1)
     const historyComplete = snapshotRows.length <= HISTORY_LIMIT
+    const declarationHistoryComplete = declarationRows.length <= HISTORY_LIMIT
     const snapshots = snapshotRows.slice(0, HISTORY_LIMIT)
     const declarations = declarationRows.slice(0, HISTORY_LIMIT)
-    const timeline = buildTimeline(snapshots, declarations, snapshotWasRecorded, historyComplete, {
-      bindings: getBindingsForIdentity(repo.id),
-    })
+    const timeline = buildTimeline(
+      snapshots,
+      declarations,
+      snapshotWasRecorded,
+      historyComplete,
+      { bindings: getBindingsForIdentity(repo.id) },
+      declarationHistoryComplete,
+    )
 
     // Observe phase duration from declaration history (uses already-fetched rows).
     // If all fetched rows share the current phase, the true start may predate
     // the fetch window — suppress the observation to avoid understating duration.
-    const declarationHistoryComplete = declarationRows.length <= HISTORY_LIMIT
     const phaseLastDeclaredAt = findPhaseDeclarationTimestamp(
       ecology.declaration?.phase,
       declarationRows,

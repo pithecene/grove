@@ -57,6 +57,22 @@ describe('binding segments', () => {
     ])
   })
 
+  it('an identity returning to a former name starts a new segment even with no other holder in between', () => {
+    seedSnapshot('orchard/alpha', '2025-01-01T12:00:00.000Z')
+    recordObservedBinding(100, 'orchard/alpha', '2025-01-01T12:00:00.000Z', db)
+    seedSnapshot('orchard/beta', '2025-02-01T12:00:00.000Z')
+    recordObservedBinding(100, 'orchard/beta', '2025-02-01T12:00:00.000Z', db)
+    seedSnapshot('orchard/alpha', '2025-03-01T12:00:00.000Z')
+    recordObservedBinding(100, 'orchard/alpha', '2025-03-01T12:00:00.000Z', db)
+
+    const segments = getBindingsForIdentity(100, db)
+    expect(segments.map((b) => [b.fullName, b.firstObservedAt, b.lastObservedAt])).toEqual([
+      ['orchard/alpha', '2025-01-01T12:00:00.000Z', '2025-01-01T12:00:00.000Z'],
+      ['orchard/beta', '2025-02-01T12:00:00.000Z', '2025-02-01T12:00:00.000Z'],
+      ['orchard/alpha', '2025-03-01T12:00:00.000Z', '2025-03-01T12:00:00.000Z'],
+    ])
+  })
+
   it('a continuing observation extends the current segment only', () => {
     seedSnapshot('orchard/alpha', '2025-01-01T12:00:00.000Z')
     recordObservedBinding(100, 'orchard/alpha', '2025-01-01T12:00:00.000Z', db)

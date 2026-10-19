@@ -1,4 +1,4 @@
-export type { BindingMethod, BindingRow, ResolutionRow } from './bindings'
+export type { BindingFloorBasis, BindingMethod, BindingRow, ResolutionRow } from './bindings'
 export {
   extendBindingForName,
   findOverlappingBinding,
@@ -9,6 +9,7 @@ export {
   getObservedSpanForName,
   getResolution,
   getSnapshotHistoryForIdentity,
+  lastObservedUnderOtherName,
   listResolutions,
   listUnboundNames,
   recordObservedBinding,

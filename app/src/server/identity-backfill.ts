@@ -1,9 +1,10 @@
 import type { RepositoryResolution } from '@grove/github'
 
-import type { GroveDb } from './db'
+import type { BindingFloorBasis, GroveDb } from './db'
 import {
   findOverlappingBinding,
   getObservedSpanForName,
+  lastObservedUnderOtherName,
   listUnboundNames,
   recordResolution,
   recordResolvedBinding,
@@ -32,8 +33,12 @@ export interface BackfillEntry {
   httpStatus?: number
   /** Observation span under this name that the binding covers */
   boundSpan?: { first: string; last: string }
-  /** Observation span under this name left unbound (predates the resolved repository) */
+  /** Observation span under this name left unbound (cannot be the resolved repository's) */
   unboundSpan?: { first: string; last: string }
+  /** What bounded the earliest bound row when part of the span stays unbound */
+  floorBasis?: Exclude<BindingFloorBasis, 'earliest_row'>
+  /** The identity's other name whose last observation set the floor */
+  previousName?: string
   message?: string
 }
 
@@ -60,6 +65,15 @@ export interface BackfillOptions {
   now?: () => string
 }
 
+type ResolvedRepo = Extract<RepositoryResolution, { outcome: 'resolved' }>['repo']
+
+interface Candidate {
+  fullName: string
+  repo: ResolvedRepo
+  status: number
+  span: { first: string; last: string } | undefined
+}
+
 /**
  * Attach evidence-backed identity bindings to historical repository names.
  *
@@ -68,10 +82,14 @@ export interface BackfillOptions {
  * current repository and its immutable id — that answer is recorded as the
  * binding's evidence. Original observations are never modified.
  *
- * - A name whose observations predate the resolved repository's creation
- *   cannot all belong to it (the name was reused): only observations from
- *   the creation time onward are bound; the earlier span stays unbound and
- *   the resolution says so.
+ * - What GitHub answers proves which repository holds the name *now*, not
+ *   since when. Rows under the name are bound only back to the latest
+ *   instant that excludes them: the repository's creation time (older rows
+ *   cannot be its own), or — stronger — the repository's last observation
+ *   under another name, since it holds one name at a time. The earlier span
+ *   stays unbound and the resolution says so (`name_reused`).
+ * - Names are bound in the order their observations end, so a name the
+ *   repository held earlier floors a name it took later.
  * - A 404 is recorded as not found *or not accessible*; nothing is deleted
  *   or inferred.
  * - Re-running is idempotent: bound names are skipped, existing bindings are
@@ -90,6 +108,8 @@ export async function backfillIdentities(
   const entries: BackfillEntry[] = []
   let bindingsInserted = 0
 
+  // Phase 1 — resolve every name; record what cannot be bound.
+  const candidates: Candidate[] = []
   for (const fullName of names) {
     const resolution = await resolve(fullName)
     const span = getObservedSpanForName(fullName, db)
@@ -133,21 +153,44 @@ export async function backfillIdentities(
       continue
     }
 
+    candidates.push({ fullName, repo, status: resolution.status, span })
+  }
+
+  // Phase 2 — bind in the order observations end, earliest-ending first.
+  candidates.sort((a, b) =>
+    (a.span?.last ?? attemptedAt).localeCompare(b.span?.last ?? attemptedAt),
+  )
+
+  for (const { fullName, repo, status, span } of candidates) {
     // Without any snapshot the name has no observed span; bind the moment
     // the name itself was recorded so the mapping still exists.
     const observed = span ?? { first: attemptedAt, last: attemptedAt }
     const createdAt = repo.created_at ?? undefined
+    const elsewhere = lastObservedUnderOtherName(repo.id, fullName, observed.last, db)
+
+    const floors: Array<{ at: string; basis: Exclude<BindingFloorBasis, 'earliest_row'> }> =
+      []
+    if (createdAt) floors.push({ at: createdAt, basis: 'created_at' })
+    if (elsewhere) {
+      floors.push({ at: elsewhere.lastObservedAt, basis: 'previous_name_observation' })
+    }
+    const floor = floors
+      .filter((f) => f.at > observed.first)
+      .reduce<(typeof floors)[number] | undefined>(
+        (top, f) => (!top || f.at > top.at ? f : top),
+        undefined,
+      )
 
     let boundSpan: { first: string; last: string } | undefined = observed
     let unboundSpan: { first: string; last: string } | undefined
     let outcome: BackfillOutcome = 'bound'
 
-    if (createdAt && observed.first < createdAt) {
-      // The name was observed before this repository existed: reuse.
+    if (floor) {
+      // The name was observed before this repository could have held it.
       outcome = 'name_reused'
-      if (observed.last >= createdAt) {
-        boundSpan = { first: createdAt, last: observed.last }
-        unboundSpan = { first: observed.first, last: createdAt }
+      if (observed.last >= floor.at) {
+        boundSpan = { first: floor.at, last: observed.last }
+        unboundSpan = { first: observed.first, last: floor.at }
       } else {
         boundSpan = undefined
         unboundSpan = observed
@@ -159,9 +202,12 @@ export async function backfillIdentities(
       outcome,
       githubId: repo.id,
       resolvedFullName: repo.full_name,
-      httpStatus: resolution.status,
+      httpStatus: status,
       boundSpan,
       unboundSpan,
+      floorBasis: floor?.basis,
+      previousName:
+        floor?.basis === 'previous_name_observation' ? elsewhere?.fullName : undefined,
     }
 
     // Another identity already holds this name over (part of) the span —
@@ -190,9 +236,11 @@ export async function backfillIdentities(
             resolvedAt: attemptedAt,
             evidence: {
               resolved_full_name: repo.full_name,
-              http_status: resolution.status,
+              http_status: status,
               created_at: createdAt ?? null,
               name_reused: outcome === 'name_reused',
+              floor_basis: floor?.basis ?? null,
+              previous_name: entry.previousName ?? null,
             },
           },
           db,
@@ -205,13 +253,15 @@ export async function backfillIdentities(
           fullName,
           attemptedAt,
           outcome,
-          httpStatus: resolution.status,
+          httpStatus: status,
           githubId: repo.id,
           resolvedFullName: repo.full_name,
           evidence: {
             created_at: createdAt ?? null,
             bound_span: boundSpan ?? null,
             unbound_span: unboundSpan ?? null,
+            floor_basis: floor?.basis ?? null,
+            previous_name: entry.previousName ?? null,
           },
         },
         db,

@@ -51,8 +51,13 @@ for (const e of report.entries) {
   const span = e.boundSpan
     ? `  bound ${e.boundSpan.first.slice(0, 10)}..${e.boundSpan.last.slice(0, 10)}`
     : ''
+  const floor = e.floorBasis
+    ? e.floorBasis === 'previous_name_observation'
+      ? ` (last observed as ${e.previousName} until then)`
+      : ' (repository created then)'
+    : ''
   const unbound = e.unboundSpan
-    ? `  unbound ${e.unboundSpan.first.slice(0, 10)}..${e.unboundSpan.last.slice(0, 10)}`
+    ? `  unbound ${e.unboundSpan.first.slice(0, 10)}..${e.unboundSpan.last.slice(0, 10)}${floor}`
     : ''
   console.log(
     `${pad(e.fullName, 40)} ${pad(e.outcome, 14)} ${pad(e.githubId ? String(e.githubId) : '', 12)} ${detail}${span}${unbound}`,

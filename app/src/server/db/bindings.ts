@@ -15,6 +15,34 @@ export type ResolutionRow = typeof identityResolutions.$inferSelect
 
 export type BindingMethod = 'observed' | 'github_redirect'
 
+/** What bounds the earliest row attributed to an identity under a name. */
+export type BindingFloorBasis =
+  /** the earliest row stored under the name */
+  | 'earliest_row'
+  /** the repository's creation time: older rows cannot be its own */
+  | 'created_at'
+  /** the identity's last observation under another name: it holds one name at a time */
+  | 'previous_name_observation'
+
+/**
+ * The identity's latest binding under a name other than `fullName` whose
+ * observations end before `before`, if any. Rows stored under `fullName` up
+ * to that binding's `last_observed_at` cannot be this identity's.
+ */
+export function lastObservedUnderOtherName(
+  githubId: number,
+  fullName: string,
+  before: string,
+  db: GroveDb = getDb(),
+): BindingRow | undefined {
+  return getBindingsForIdentity(githubId, db)
+    .filter((b) => b.fullName !== fullName && b.lastObservedAt < before)
+    .reduce<BindingRow | undefined>(
+      (latest, b) => (!latest || b.lastObservedAt > latest.lastObservedAt ? b : latest),
+      undefined,
+    )
+}
+
 /**
  * Record that `fullName` was observed to denote `githubId` at `observedAt`.
  *
@@ -22,12 +50,14 @@ export type BindingMethod = 'observed' | 'github_redirect'
  *   observation extends that segment's `last_observed_at`.
  * - Otherwise a new time segment starts at `observedAt`: a name observed
  *   under a *different* id (reuse), or an identity returning to a name it
- *   held before, never extends a segment across another identity's interval.
+ *   held before — whether or not another identity held it in between —
+ *   never extends a segment across the interval it spent under another name.
  * - A name with no binding at all (a database recorded before identity
- *   tracking) adopts the rows already stored under it: the segment starts at
- *   the earliest stored row, bounded below by the repository's `created_at`
- *   when known — rows older than the repository cannot be its own. The
- *   adoption is recorded as evidence on the binding.
+ *   tracking) adopts the rows already stored under it back to the latest
+ *   instant that excludes them: the repository's `created_at` when known
+ *   (rows older than the repository cannot be its own), or — stronger — the
+ *   identity's last observation under another name (a repository holds one
+ *   name at a time). The adoption and its basis are recorded as evidence.
  * - Bounds are exact timestamps. Rows stored under the name after the
  *   segment started extend `last_observed_at`, so a snapshot or declaration
  *   recorded moments after the binding in the same request is covered.
@@ -41,8 +71,16 @@ export function recordObservedBinding(
 ): void {
   const existing = getBindingsForName(fullName, db)
   const current = existing[0]
+  // The identity's latest observation under another name. When it is later
+  // than this name's current segment, the identity left the name and is
+  // now returning to it.
+  const elsewhere = lastObservedUnderOtherName(githubId, fullName, observedAt, db)
+  const returning =
+    current !== undefined &&
+    elsewhere !== undefined &&
+    elsewhere.lastObservedAt > current.lastObservedAt
 
-  if (current && current.githubId === githubId) {
+  if (current && current.githubId === githubId && !returning) {
     // Same identity, same segment: widen it to include this observation.
     if (observedAt > current.lastObservedAt) {
       db.update(repositoryBindings)
@@ -65,13 +103,23 @@ export function recordObservedBinding(
   if (existing.length === 0) {
     const span = getObservedSpanForName(fullName, db)
     if (span && span.first < observedAt) {
-      const floor = createdAt && createdAt > span.first ? createdAt : span.first
-      if (floor < observedAt) {
-        firstObservedAt = floor
+      const floors: Array<{ at: string; basis: BindingFloorBasis }> = [
+        { at: span.first, basis: 'earliest_row' },
+      ]
+      if (createdAt) floors.push({ at: createdAt, basis: 'created_at' })
+      if (elsewhere) {
+        floors.push({ at: elsewhere.lastObservedAt, basis: 'previous_name_observation' })
+      }
+      const floor = floors.reduce((top, f) => (f.at > top.at ? f : top))
+      if (floor.at < observedAt) {
+        firstObservedAt = floor.at
         evidence = JSON.stringify({
           adopted_prior_rows: true,
           earliest_row: span.first,
           created_at: createdAt ?? null,
+          floor_basis: floor.basis,
+          previous_name: elsewhere?.fullName ?? null,
+          previous_name_last_observed_at: elsewhere?.lastObservedAt ?? null,
         })
       }
     }
