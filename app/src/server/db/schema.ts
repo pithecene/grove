@@ -14,6 +14,8 @@ export const repositories = sqliteTable('repositories', {
   sizeKb: integer('size_kb'),
   lastObservedAt: text('last_observed_at').notNull(),
   githubId: integer('github_id'),
+  /** GitHub creation time: the repository existed from here, with or without commits */
+  createdAt: text('created_at'),
 })
 
 /**

@@ -193,7 +193,9 @@ function DensityTransitionView({
       </div>
       <div className="text-sm" style={{ color: 'var(--grove-text)' }}>
         {isFirst
-          ? `Structural character first observed as ${formatTierName(entry.toTier)}`
+          ? entry.method === 'history'
+            ? `Structural character first read from history as ${formatTierName(entry.toTier)}`
+            : `Structural character first observed as ${formatTierName(entry.toTier)}`
           : 'Structural character shifted'}
       </div>
       {!isFirst && (
@@ -203,6 +205,11 @@ function DensityTransitionView({
         >
           from {formatTierName(entry.fromTier!)} to{' '}
           {formatTierName(entry.toTier)}
+        </div>
+      )}
+      {entry.method === 'history' && (
+        <div className="text-xs" style={{ opacity: 0.7, color: 'var(--grove-text-muted)' }}>
+          read from history, not observed that day
         </div>
       )}
       {entry.freshlyRecorded && (
@@ -225,9 +232,14 @@ function DensitySpanView({
         className="text-xs"
         style={{ color: 'var(--grove-text-muted)' }}
       >
-        Observed as {formatTierName(entry.tier)} &mdash;{' '}
+        {entry.method === 'history'
+          ? 'Read from history as'
+          : entry.method === 'mixed'
+            ? 'Observed and read from history as'
+            : 'Observed as'}{' '}
+        {formatTierName(entry.tier)} &mdash;{' '}
         {formatDate(entry.observedAt)} through {formatDate(entry.spanEnd)} (
-        {entry.observationCount} observations)
+        {entry.observationCount} {entry.method === 'history' ? 'days' : 'observations'})
       </div>
       {entry.freshlyRecorded && (
         <div className="text-xs" style={{ opacity: 0.5, color: 'var(--grove-text-muted)' }}>
@@ -260,6 +272,15 @@ function DeclarationChangeView({
           {describeDeclarationChange(change)}
         </div>
       ))}
+      {entry.method === 'history' && (
+        <div
+          className="text-xs"
+          style={{ color: 'var(--grove-text-muted)', opacity: 0.7 }}
+        >
+          Declared in repository on {formatDate(entry.observedAt)} &mdash; recorded from history
+          {entry.recordedAt ? ` on ${formatDate(entry.recordedAt)}` : ''}
+        </div>
+      )}
     </div>
   )
 }

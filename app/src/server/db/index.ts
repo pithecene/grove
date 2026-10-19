@@ -5,6 +5,7 @@ export {
   getBindingsForIdentity,
   getBindingsForName,
   getDeclarationHistoryForIdentity,
+  getHistoryDaysForIdentity,
   getIdentityForName,
   getObservedSpanForName,
   getResolution,

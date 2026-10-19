@@ -68,6 +68,7 @@ function upsertRepositoryRow(repo: RepositoryRow, now: string, db: GroveDb) {
       sizeKb: repo.sizeKb ?? null,
       lastObservedAt: now,
       githubId,
+      createdAt: repo.createdAt ?? null,
     })
     .onConflictDoUpdate({
       target: repositories.fullName,
@@ -77,8 +78,9 @@ function upsertRepositoryRow(repo: RepositoryRow, now: string, db: GroveDb) {
         pushedAt: repo.pushedAt ?? null,
         sizeKb: repo.sizeKb ?? null,
         lastObservedAt: now,
-        // Keep a previously observed id when this observation carries none.
+        // Keep a previously observed id (and creation time) when this observation carries none.
         ...(githubId !== null ? { githubId } : {}),
+        ...(repo.createdAt ? { createdAt: repo.createdAt } : {}),
       },
     })
     .run()
@@ -196,19 +198,18 @@ function isWithinInterval(
   // Both arms stay inside the current segment: an identity returning to a
   // name after another held it starts afresh too. With no segment at all,
   // unbound rows under the name are nobody's yet — only tagged rows count.
+  // Only contemporaneous observations throttle: a row recorded from history
+  // (dated at a day's end) is not a recent look at the repository.
+  const own =
+    githubId === undefined
+      ? byName
+      : segmentStart === undefined
+        ? and(eq(ecologySnapshots.fullName, fullName), eq(ecologySnapshots.githubId, githubId))
+        : and(byName, or(eq(ecologySnapshots.githubId, githubId), isNull(ecologySnapshots.githubId)))
   const latest = db
     .select({ observedAt: ecologySnapshots.observedAt })
     .from(ecologySnapshots)
-    .where(
-      githubId === undefined
-        ? byName
-        : segmentStart === undefined
-          ? and(eq(ecologySnapshots.fullName, fullName), eq(ecologySnapshots.githubId, githubId))
-          : and(
-              byName,
-              or(eq(ecologySnapshots.githubId, githubId), isNull(ecologySnapshots.githubId)),
-            ),
-    )
+    .where(and(own, eq(ecologySnapshots.method, 'observed')))
     .orderBy(desc(ecologySnapshots.observedAt))
     .limit(1)
     .get()

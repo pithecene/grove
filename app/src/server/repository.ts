@@ -31,6 +31,7 @@ import {
   finishRun,
   getBindingsForIdentity,
   getDeclarationHistoryForIdentity,
+  getHistoryDaysForIdentity,
   getSnapshotHistoryForIdentity,
   recordDeclarationIfChanged,
   recordRunRepository,
@@ -202,6 +203,19 @@ export const loadRepository = createServerFn({ method: 'GET' })
     const declarationHistoryComplete = declarationRows.length <= HISTORY_LIMIT
     const snapshots = snapshotRows.slice(0, HISTORY_LIMIT)
     const declarations = declarationRows.slice(0, HISTORY_LIMIT)
+    // Spans without observation are read from observed rows alone, fetched
+    // on their own so that days recorded from history cannot crowd them out
+    // of the window; spans recorded from history come from all such days.
+    const observedRows = getSnapshotHistoryForIdentity(repo.id, {
+      limit: HISTORY_LIMIT + 1,
+      method: 'observed',
+    })
+    const observedDeclarations = getDeclarationHistoryForIdentity(
+      repo.id,
+      HISTORY_LIMIT + 1,
+      undefined,
+      'observed',
+    )
     const timeline = buildTimeline(
       snapshots,
       declarations,
@@ -209,6 +223,15 @@ export const loadRepository = createServerFn({ method: 'GET' })
       historyComplete,
       { bindings: getBindingsForIdentity(repo.id) },
       declarationHistoryComplete,
+      {
+        observed: {
+          snapshots: observedRows.slice(0, HISTORY_LIMIT),
+          complete: observedRows.length <= HISTORY_LIMIT,
+          declarations: observedDeclarations.slice(0, HISTORY_LIMIT),
+          declarationsComplete: observedDeclarations.length <= HISTORY_LIMIT,
+        },
+        historyDays: getHistoryDaysForIdentity(repo.id),
+      },
     )
 
     // Observe phase duration from declaration history (uses already-fetched rows).

@@ -76,7 +76,14 @@ export async function fetchStructuralSignals(
   }
 }
 
-interface TreeSignals {
+/** One entry of a repository tree, as GitHub's Trees API or `ls-tree -r -t` lists it. */
+export interface TreeEntry {
+  path: string
+  /** 'blob' | 'tree' (anything else is ignored) */
+  type: string
+}
+
+export interface TreeSignals {
   fileCount: number | undefined
   manifests: string[]
   hasRootPackageJson: boolean
@@ -104,13 +111,24 @@ async function fetchTreeSignals(
   }
 
   const data = await response.json()
-  const tree: Array<{ path: string; type: string }> = data.tree ?? []
+  const tree: TreeEntry[] = data.tree ?? []
 
   // GitHub truncates recursive trees for very large repos.
-  // When truncated, fileCount would be an undercount — drop it to avoid
-  // presenting partial data as complete observation.
-  const truncated: boolean = data.truncated === true
+  return classifyTree(tree, data.truncated === true)
+}
 
+/**
+ * Classify a repository tree: file count, dependency manifests, documentation,
+ * CI and test artifacts. One definition for every method of observation —
+ * the live tree fetch and a tree read from the repository's own history
+ * must agree on what the same tree means.
+ *
+ * When the listing is truncated, only positive observations are reliable:
+ * absence cannot be confirmed, so undetected signals are `undefined`
+ * (not observed) rather than `false` (observed as absent), and the file
+ * count is dropped rather than presented as complete.
+ */
+export function classifyTree(tree: ReadonlyArray<TreeEntry>, truncated = false): TreeSignals {
   let fileCount = 0
   const manifests: string[] = []
   let hasRootPackageJson = false
@@ -200,10 +218,6 @@ async function fetchTreeSignals(
     }
   }
 
-  // When truncated, only positive observations are reliable — absence
-  // cannot be confirmed because the tree is incomplete. Return undefined
-  // (not observed) instead of false (observed as absent) for any signal
-  // that was not positively detected.
   const guard = (observed: boolean): boolean | undefined =>
     truncated ? (observed || undefined) : observed
 
@@ -261,6 +275,50 @@ async function fetchCommitSignals(
   return { commitsLast30d, commitsLast90d }
 }
 
+/**
+ * Count dependencies of a root `package.json` whose short name matches a
+ * repository of the ecosystem (e.g. "justapithecus/lode" → "lode"). Pure:
+ * the same definition serves the live fetch and history.
+ */
+export function countEcosystemDependencies(
+  packageJsonText: string,
+  ecosystemRepoNames: ReadonlyArray<string>,
+): number | undefined {
+  try {
+    const pkg = JSON.parse(packageJsonText)
+
+    // Collect all dependency names
+    const allDeps = new Set<string>([
+      ...Object.keys(pkg.dependencies ?? {}),
+      ...Object.keys(pkg.devDependencies ?? {}),
+      ...Object.keys(pkg.peerDependencies ?? {}),
+    ])
+
+    const ecosystemShortNames = new Set(
+      ecosystemRepoNames.map((name) => {
+        const parts = name.split('/')
+        return (parts[parts.length - 1] ?? name).toLowerCase()
+      }),
+    )
+
+    let count = 0
+    for (const dep of allDeps) {
+      // "@scope/pkg" → "pkg", "some-lib" → "some-lib"
+      const depShortName = dep.includes('/')
+        ? (dep.split('/').pop() ?? dep).toLowerCase()
+        : dep.toLowerCase()
+
+      if (ecosystemShortNames.has(depShortName)) {
+        count++
+      }
+    }
+
+    return count
+  } catch {
+    return undefined
+  }
+}
+
 async function fetchEcosystemDependencyCount(
   fullName: string,
   defaultBranch: string,
@@ -280,39 +338,7 @@ async function fetchEcosystemDependencyCount(
 
     if (!response.ok) return undefined
 
-    const content = await response.text()
-    const pkg = JSON.parse(content)
-
-    // Collect all dependency names
-    const allDeps = new Set<string>([
-      ...Object.keys(pkg.dependencies ?? {}),
-      ...Object.keys(pkg.devDependencies ?? {}),
-      ...Object.keys(pkg.peerDependencies ?? {}),
-    ])
-
-    // Build a set of ecosystem repo short names for exact matching
-    // e.g. "justapithecus/lode" → "lode"
-    const ecosystemShortNames = new Set(
-      ecosystemRepoNames.map((name) => {
-        const parts = name.split('/')
-        return parts[parts.length - 1]!.toLowerCase()
-      }),
-    )
-
-    let count = 0
-    for (const dep of allDeps) {
-      // Extract the package's short name:
-      // "@scope/pkg" → "pkg", "some-lib" → "some-lib"
-      const depShortName = dep.includes('/')
-        ? dep.split('/').pop()!.toLowerCase()
-        : dep.toLowerCase()
-
-      if (ecosystemShortNames.has(depShortName)) {
-        count++
-      }
-    }
-
-    return count
+    return countEcosystemDependencies(await response.text(), ecosystemRepoNames)
   } catch {
     return undefined
   }

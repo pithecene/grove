@@ -49,6 +49,13 @@ function seed(fullName: string, phase: string, count: number, startDay = 1) {
         observedAt: `2025-01-${String(startDay + i).padStart(2, '0')}T12:00:00Z`,
         classified: true,
         phase,
+        // Rows carry the stratum the subject declares (role by name, as the subjects do).
+        horizon: 'perennial',
+        role: fullName.includes('core')
+          ? 'infrastructure'
+          : fullName.includes('app')
+            ? 'application'
+            : 'library',
       })
       .run()
   }

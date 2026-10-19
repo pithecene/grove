@@ -19,6 +19,8 @@ export type TimelineEntry =
       fromTier: string | null
       toTier: string
       freshlyRecorded?: boolean
+      /** Method of the row the transition was read from: `observed` or `history` */
+      method: string
     }
   | {
       kind: 'density_span'
@@ -27,11 +29,16 @@ export type TimelineEntry =
       spanEnd: string
       observationCount: number
       freshlyRecorded?: boolean
+      /** `observed`, `history`, or `mixed` when the run spans both methods */
+      method: 'observed' | 'history' | 'mixed'
     }
   | {
       kind: 'declaration_change'
       observedAt: string
       changes: Array<{ field: string; from: string | null; to: string | null }>
+      /** `observed` at that moment, or `history` (a commit; `recordedAt` says when it was read) */
+      method: string
+      recordedAt: string | null
     }
   | {
       /** No observation between `lastObservedAt` and `observedAt` (the resumption). */
@@ -83,6 +90,11 @@ export interface TimelineIdentity {
  * @param identity - when given, name changes between bindings are emitted.
  * @param declarationsComplete - true when the fetched declaration rows are
  *   the full declaration history (rows returned < limit).
+ * @param series - optional separately fetched series: `observed` snapshots
+ *   (with their own truncation state) bound the spans without observation,
+ *   and `historyDays` (dates only, all of them) form the spans recorded from
+ *   history. Without them both are derived from `snapshotsDesc`, which a
+ *   long reconstructed run would crowd out of a bounded window.
  */
 export function buildTimeline(
   snapshotsDesc: SnapshotRow[],
@@ -91,6 +103,15 @@ export function buildTimeline(
   historyComplete: boolean,
   identity?: TimelineIdentity,
   declarationsComplete = true,
+  series?: {
+    observed: {
+      snapshots: SnapshotRow[]
+      complete: boolean
+      declarations: DeclarationRow[]
+      declarationsComplete: boolean
+    }
+    historyDays: Array<{ observedAt: string; recordedAt: string | null }>
+  },
 ): TimelineEntry[] {
   const densityEntries = buildDensityEntries(snapshotsDesc, historyComplete)
 
@@ -104,12 +125,21 @@ export function buildTimeline(
   }
 
   const declarationEntries = buildDeclarationEntries(declarationsDesc)
-  const gapEntries = buildGapEntries(snapshotsDesc, declarationsDesc, {
-    snapshotsComplete: historyComplete,
-    declarationsComplete,
-  })
+  const gapEntries = series
+    ? buildGapEntries(series.observed.snapshots, series.observed.declarations, {
+        snapshotsComplete: series.observed.complete,
+        declarationsComplete: series.observed.declarationsComplete,
+      })
+    : buildGapEntries(snapshotsDesc, declarationsDesc, {
+        snapshotsComplete: historyComplete,
+        declarationsComplete,
+      })
   const nameEntries = identity ? buildNameChangeEntries(identity.bindings) : []
-  const historyEntries = buildHistorySpanEntries(snapshotsDesc)
+  const historyEntries = buildHistorySpanEntries(
+    series
+      ? series.historyDays.map((d) => ({ ...d, method: 'history' }))
+      : snapshotsDesc,
+  )
 
   // Merge chronologically DESC (most recent first). On equal timestamps a
   // gap sorts after (older than) the observation that ended it.
@@ -212,7 +242,9 @@ export function buildGapEntries(
  * from the repository's commit history. Presented beside — never in place
  * of — the spans without observation.
  */
-export function buildHistorySpanEntries(snapshotsDesc: SnapshotRow[]): TimelineEntry[] {
+export function buildHistorySpanEntries(
+  snapshotsDesc: Array<{ observedAt: string; recordedAt: string | null; method: string }>,
+): TimelineEntry[] {
   const asc = snapshotsDesc
     .filter((s) => s.method === 'history')
     .map((s) => ({ day: s.observedAt.slice(0, 10), row: s }))
@@ -292,7 +324,10 @@ function buildDensityEntries(
   // Walk ascending — detect transitions and compress spans
   let runStart = withTier[0]
   let runCount = 1
+  let runMethods = new Set<string>([withTier[0].method])
   let prevTier: string | null = null
+  const spanMethod = (methods: Set<string>): 'observed' | 'history' | 'mixed' =>
+    methods.size > 1 ? 'mixed' : methods.has('history') ? 'history' : 'observed'
 
   // Only emit "first observed" (fromTier: null) when the history window
   // contains the complete record. When truncated, the earliest snapshot
@@ -303,6 +338,7 @@ function buildDensityEntries(
       observedAt: withTier[0].observedAt,
       fromTier: null,
       toTier: withTier[0].densityTier,
+      method: withTier[0].method,
     })
   }
   prevTier = withTier[0].densityTier
@@ -313,6 +349,7 @@ function buildDensityEntries(
     if (snap.densityTier === prevTier) {
       // Continue the run
       runCount++
+      runMethods.add(snap.method)
     } else {
       // Emit span for the completed run (only if run >= 2)
       if (runCount >= 2) {
@@ -322,6 +359,7 @@ function buildDensityEntries(
           tier: prevTier!,
           spanEnd: withTier[i - 1].observedAt,
           observationCount: runCount,
+          method: spanMethod(runMethods),
         })
       }
 
@@ -331,11 +369,13 @@ function buildDensityEntries(
         observedAt: snap.observedAt,
         fromTier: prevTier,
         toTier: snap.densityTier,
+        method: snap.method,
       })
 
       prevTier = snap.densityTier
       runStart = snap
       runCount = 1
+      runMethods = new Set([snap.method])
     }
   }
 
@@ -347,6 +387,7 @@ function buildDensityEntries(
       tier: prevTier!,
       spanEnd: withTier[withTier.length - 1].observedAt,
       observationCount: runCount,
+      method: spanMethod(runMethods),
     })
   }
 
@@ -390,6 +431,8 @@ function buildDeclarationEntries(declarationsDesc: DeclarationRow[]): TimelineEn
         kind: 'declaration_change',
         observedAt: curr.observedAt,
         changes,
+        method: curr.method,
+        recordedAt: curr.recordedAt,
       })
     }
   }

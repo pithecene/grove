@@ -78,6 +78,63 @@ describe('spans recorded from history', () => {
   })
 })
 
+describe('density entries say which method they were read from', () => {
+  it('a transition read from a history row, and spans of one or both methods, are marked', () => {
+    const rows = [
+      row('2025-01-05T12:00:00.000Z', 'observed', { densityTier: 'thickening' }),
+      row('2025-01-04T23:59:59.999Z', 'history', { densityTier: 'thickening' }),
+      row('2025-01-03T23:59:59.999Z', 'history', { densityTier: 'rooting' }),
+      row('2025-01-02T23:59:59.999Z', 'history', { densityTier: 'rooting' }),
+      row('2025-01-01T12:00:00.000Z', 'observed', { densityTier: 'rooting' }),
+    ]
+    const timeline = buildTimeline(rows, [], false, true)
+    const transition = timeline.find((e) => e.kind === 'density_transition' && e.fromTier !== null)
+    expect(transition).toMatchObject({ toTier: 'thickening', method: 'history' })
+    const spans = timeline.filter((e) => e.kind === 'density_span')
+    expect(spans.map((s) => s.kind === 'density_span' && [s.tier, s.method])).toEqual([
+      ['thickening', 'mixed'],
+      ['rooting', 'mixed'],
+    ])
+  })
+})
+
+describe('a long reconstructed run does not crowd the gap out of a bounded window', () => {
+  it('gaps come from the separately fetched observed series; spans from all history days', () => {
+    // The bounded window holds only the newest rows: two observed days and
+    // 48 history days. The observed row that opens the gap lies beyond it.
+    const window: SnapshotRow[] = [row('2025-10-19T12:00:00.000Z', 'observed'), row('2025-10-18T12:00:00.000Z', 'observed')]
+    for (let i = 0; i < 48; i++) {
+      const d = new Date(Date.UTC(2025, 9, 17) - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      window.push(row(`${d}T23:59:59.999Z`, 'history'))
+    }
+    const observed = {
+      snapshots: [
+        row('2025-10-19T12:00:00.000Z', 'observed'),
+        row('2025-10-18T12:00:00.000Z', 'observed'),
+        row('2025-05-01T12:00:00.000Z', 'observed'),
+      ],
+      complete: true,
+    }
+    const historyDays: Array<{ observedAt: string; recordedAt: string | null }> = []
+    for (let i = 0; i < 193; i++) {
+      const d = new Date(Date.UTC(2025, 9, 17) - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      historyDays.push({ observedAt: `${d}T23:59:59.999Z`, recordedAt: '2025-10-19T10:00:00.000Z' })
+    }
+
+    const withoutSeries = buildTimeline(window, [], false, false)
+    expect(withoutSeries.some((e) => e.kind === 'observation_gap')).toBe(false)
+
+    const timeline = buildTimeline(window, [], false, false, undefined, true, {
+      observed: { ...observed, declarations: [], declarationsComplete: true },
+      historyDays,
+    })
+    const gap = timeline.find((e) => e.kind === 'observation_gap')
+    expect(gap).toMatchObject({ lastObservedAt: '2025-05-01T12:00:00.000Z', observedAt: '2025-10-18T12:00:00.000Z', days: 170 })
+    const span = timeline.find((e) => e.kind === 'history_span')
+    expect(span).toMatchObject({ days: 193, spanEnd: '2025-10-17T23:59:59.999Z' })
+  })
+})
+
 describe('declarations are ordered by observation time, not insertion', () => {
   it('an older declaration inserted later is not the latest', () => {
     db.insert(repositories)
@@ -145,6 +202,19 @@ describe('strata must hold across a window', () => {
       '2025-01-14',
     )
     expect(result?.coreDivergence.map((c) => c.fullName)).toEqual(['org/core'])
+  })
+
+  it('rows that disagree with the current declaration, or lack one, make the window undeterminable', () => {
+    // Rows agree among themselves but the repository now declares another role.
+    seed('application', [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14])
+    expect(
+      evaluatePortfolioEcosystemTriggers(
+        'dormancy',
+        [repo('org/core', 'perennial', 'infrastructure', 'expanding')],
+        db,
+        '2025-01-14',
+      ),
+    ).toBeUndefined()
   })
 
   it('a window whose rows change role is undeterminable for stratum-based triggers', () => {

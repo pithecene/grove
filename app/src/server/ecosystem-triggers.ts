@@ -63,7 +63,7 @@ function buildContexts(
       // not agree on them (a declaration moved inside it) is undeterminable:
       // persistence is not attributed to a stratum the repository did not
       // hold throughout. Phase differences are the relation itself.
-      const persistence = strataAgree(slots)
+      const persistence = strataAgree(slots, repo)
         ? assessed
         : {
             ...assessed,
@@ -76,14 +76,18 @@ function buildContexts(
     .filter((ctx): ctx is NonNullable<typeof ctx> => ctx !== undefined)
 }
 
-/** Whether every observed row in the window declares the same role and horizon. */
-function strataAgree(slots: CalendarSlot<SnapshotRow>[]): boolean {
-  const seen = new Set<string>()
-  for (const slot of slots) {
-    if (!slot.snapshot) continue
-    seen.add(`${slot.snapshot.role ?? ''}|${slot.snapshot.horizon ?? ''}`)
-  }
-  return seen.size <= 1
+/**
+ * Whether every observed row in the window declares the role and horizon
+ * the repository declares now — the stratum its persistence is attributed
+ * to. A row with another value, or none, breaks the agreement.
+ */
+function strataAgree(slots: CalendarSlot<SnapshotRow>[], repo: TriggerSubject): boolean {
+  const role = repo.declaration?.role ?? null
+  const horizon = repo.declaration?.horizon ?? null
+  return slots.every(
+    (slot) =>
+      !slot.snapshot || (slot.snapshot.role === role && slot.snapshot.horizon === horizon),
+  )
 }
 
 /** True when at least one window carries enough determinate observations to be examined. */

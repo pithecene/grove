@@ -163,6 +163,22 @@ describe('rows recorded with their identity', () => {
     expect(recordDeclarationIfChanged(NAME, declaration, true, db, 100)).toBe(true)
   })
 
+  it('a row recorded from history never throttles a contemporaneous observation', () => {
+    observeAs(100)
+    // Backfill wrote yesterday at its end, moments ago in wall-clock terms.
+    const yesterdayEnd = `${new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().slice(0, 10)}T23:59:59.999Z`
+    db.insert(ecologySnapshots)
+      .values({
+        fullName: NAME,
+        githubId: 100,
+        observedAt: yesterdayEnd,
+        method: 'history',
+        classified: true,
+      })
+      .run()
+    expect(recordSnapshot({ ...ecology, githubId: 100 }, undefined, undefined, db)).toBe(true)
+  })
+
   it('historical rows without an id still resolve through bindings alongside id rows', () => {
     // A pre-row-identity row under the name, adopted by the binding on first observation.
     db.insert(repositories)
