@@ -43,13 +43,11 @@ export type TimelineEntry =
       recordedAt: string | null
     }
   | {
-      /** No observation between `lastObservedAt` and `observedAt` (the resumption). */
+      /** No row of any kind between `lastObservedAt` and `observedAt` (the resumption). */
       kind: 'observation_gap'
       observedAt: string
       lastObservedAt: string
       days: number
-      /** Days inside the span recorded from the repository's history, and the UTC days they were recorded on */
-      recordedFromHistory?: { days: number; recordedOn: string[] }
     }
   | {
       /**
@@ -82,12 +80,11 @@ export interface TimelineIdentity {
  * @param identity - when given, name changes between bindings are emitted.
  * @param declarationsComplete - true when the fetched declaration rows are
  *   the full declaration history (rows returned < limit).
- * @param series - optional separately fetched series: `observed` snapshots
- *   (with their own truncation state) bound the spans without observation,
- *   and `historyDays` (dates only, all of them) say how much of each such
- *   span was recorded from history. Without them both are derived from
- *   `snapshotsDesc`, which a long reconstructed run would crowd out of a
- *   bounded window.
+ * @param series - optional separately fetched series: `observed` rows (with
+ *   their own truncation state) and `historyDays` (dates only, all of them)
+ *   together bound the spans without any row. Without them the spans are
+ *   derived from `snapshotsDesc`, which a long run of days would crowd out
+ *   of a bounded window.
  */
 export function buildTimeline(
   snapshotsDesc: SnapshotRow[],
@@ -118,22 +115,24 @@ export function buildTimeline(
   }
 
   const declarationEntries = buildDeclarationEntries(declarationsDesc)
+  // Every row is a day of the series, however it was recorded: a span is
+  // empty only where there is no row at all.
   const gapEntries = series
-    ? buildGapEntries(series.observed.snapshots, series.observed.declarations, {
-        snapshotsComplete: series.observed.complete,
-        declarationsComplete: series.observed.declarationsComplete,
-      })
+    ? buildGapEntries(
+        [...series.observed.snapshots, ...series.historyDays].sort((a, b) =>
+          b.observedAt.localeCompare(a.observedAt),
+        ),
+        series.observed.declarations,
+        {
+          snapshotsComplete: series.observed.complete,
+          declarationsComplete: series.observed.declarationsComplete,
+        },
+      )
     : buildGapEntries(snapshotsDesc, declarationsDesc, {
         snapshotsComplete: historyComplete,
         declarationsComplete,
       })
   const nameEntries = identity ? buildNameChangeEntries(identity.bindings) : []
-  const historyDays = series
-    ? series.historyDays
-    : snapshotsDesc.filter((s) => s.method === 'history')
-  for (const gap of gapEntries) {
-    if (gap.kind === 'observation_gap') annotateGapWithHistory(gap, historyDays)
-  }
 
   // Merge chronologically DESC (most recent first). On equal timestamps a
   // gap sorts after (older than) the observation that ended it.
@@ -186,14 +185,12 @@ export interface GapBounds {
 }
 
 export function buildGapEntries(
-  snapshotsDesc: SnapshotRow[],
-  declarationsDesc: DeclarationRow[] = [],
+  snapshotsDesc: Array<{ observedAt: string }>,
+  declarationsDesc: Array<{ observedAt: string }> = [],
   bounds: GapBounds = {},
 ): TimelineEntry[] {
-  // Only contemporaneous observations bound a span: a row recorded from
-  // history says what the repository was, not that Grove looked.
-  const observedSnapshots = snapshotsDesc.filter((s) => s.method !== 'history')
-  const observedDeclarations = declarationsDesc.filter((d) => d.method !== 'history')
+  const observedSnapshots = snapshotsDesc
+  const observedDeclarations = declarationsDesc
   const edges: string[] = []
   if (bounds.snapshotsComplete === false && observedSnapshots.length > 0) {
     edges.push(observedSnapshots[observedSnapshots.length - 1].observedAt)
@@ -226,65 +223,6 @@ export function buildGapEntries(
     }
   }
   return entries
-}
-
-// ── Days recorded from history ────────────────────────────────────
-
-type HistoryDay = { observedAt: string; recordedAt: string | null }
-
-/** The distinct UTC days a set of history rows were recorded on, ascending. */
-function recordingDays(historyDays: HistoryDay[]): string[] {
-  return [
-    ...new Set(historyDays.flatMap((d) => (d.recordedAt ? [d.recordedAt.slice(0, 10)] : []))),
-  ].sort()
-}
-
-/**
- * Say, on a span without observation, how many of its days were recorded
- * from the repository's history and when. Provenance is stated where
- * presence is the subject; the days themselves take their place in the
- * series like any other day.
- */
-function annotateGapWithHistory(
-  gap: Extract<TimelineEntry, { kind: 'observation_gap' }>,
-  historyDays: HistoryDay[],
-): void {
-  const lastDay = gap.lastObservedAt.slice(0, 10)
-  const resumeDay = gap.observedAt.slice(0, 10)
-  const inside = historyDays.filter((d) => {
-    const day = d.observedAt.slice(0, 10)
-    return day > lastDay && day < resumeDay
-  })
-  const days = new Set(inside.map((d) => d.observedAt.slice(0, 10)))
-  if (days.size > 0) {
-    gap.recordedFromHistory = { days: days.size, recordedOn: recordingDays(inside) }
-  }
-}
-
-export interface HistoryProvenance {
-  /** Distinct UTC days in the series recorded from the repository's history */
-  days: number
-  /** The first and last of those days (UTC) */
-  from: string
-  through: string
-  /** The UTC days those recordings were made on, ascending */
-  recordedOn: string[]
-}
-
-/**
- * The series' provenance in one statement: how many of its days were
- * recorded from history, and when — whether or not they fall inside a span
- * without observation. Every row keeps its own method.
- */
-export function historyProvenance(historyDays: HistoryDay[]): HistoryProvenance | undefined {
-  if (historyDays.length === 0) return undefined
-  const days = [...new Set(historyDays.map((d) => d.observedAt.slice(0, 10)))].sort()
-  return {
-    days: days.length,
-    from: days[0],
-    through: days[days.length - 1],
-    recordedOn: recordingDays(historyDays),
-  }
 }
 
 // ── Name changes ──────────────────────────────────────────────────

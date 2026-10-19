@@ -7,7 +7,7 @@ import { createDb, type GroveDb } from '../db/client'
 import { getDeclarationHistory, getLatestDeclaration, recordDeclarationIfChanged } from '../db/declarations'
 import { declarationChanges, ecologySnapshots, repositories } from '../db/schema'
 import { evaluatePortfolioEcosystemTriggers, type TriggerSubject } from '../ecosystem-triggers'
-import { buildGapEntries, buildTimeline, historyProvenance } from '../timeline'
+import { buildGapEntries, buildTimeline } from '../timeline'
 
 let db: GroveDb
 
@@ -47,36 +47,29 @@ function row(observedAt: string, method: 'observed' | 'history', overrides: Part
 }
 
 describe('spans recorded from history', () => {
-  it('rows recorded from history never close a span without observation', () => {
+  it('a row recorded from history is a day like any other: it closes a span', () => {
     const rows = [
       row('2025-06-01T12:00:00.000Z', 'observed'),
       row('2025-03-01T23:59:59.999Z', 'history'),
       row('2025-01-01T12:00:00.000Z', 'observed'),
     ]
     const gaps = buildGapEntries(rows)
-    expect(gaps).toHaveLength(1)
-    expect(gaps[0]).toMatchObject({ lastObservedAt: '2025-01-01T12:00:00.000Z', days: 151 })
+    expect(gaps.map((g) => g.kind === 'observation_gap' && [g.lastObservedAt, g.days])).toEqual([
+      ['2025-01-01T12:00:00.000Z', 59],
+      ['2025-03-01T23:59:59.999Z', 91],
+    ])
   })
 
-  it('a span without observation says how many of its days were recorded from history, and when', () => {
-    const rows = [
-      row('2025-06-01T12:00:00.000Z', 'observed'),
-      row('2025-01-04T23:59:59.999Z', 'history', { recordedAt: '2025-10-20T10:00:00.000Z' }),
+  it('a run of days filled from history leaves no span without rows', () => {
+    const rows = [row('2025-01-05T12:00:00.000Z', 'observed')]
+    rows.push(
+      row('2025-01-04T23:59:59.999Z', 'history'),
       row('2025-01-03T23:59:59.999Z', 'history'),
       row('2025-01-02T23:59:59.999Z', 'history'),
-      // Same day as the last observation: not a day of the absence.
-      row('2025-01-01T23:59:59.999Z', 'history'),
       row('2025-01-01T12:00:00.000Z', 'observed'),
-    ]
+    )
     const timeline = buildTimeline(rows, [], false, true)
-    expect(timeline.filter((e) => e.kind === 'observation_gap')).toHaveLength(1)
-    expect(timeline.find((e) => e.kind === 'observation_gap')).toMatchObject({
-      days: 151,
-      recordedFromHistory: { days: 3, recordedOn: ['2025-10-19', '2025-10-20'] },
-    })
-    // Without a day recorded from history the span says nothing of it.
-    const bare = buildTimeline([rows[0], rows[5]], [], false, true)
-    expect(bare.find((e) => e.kind === 'observation_gap')).not.toHaveProperty('recordedFromHistory')
+    expect(timeline.some((e) => e.kind === 'observation_gap')).toBe(false)
   })
 })
 
@@ -111,14 +104,10 @@ describe('density entries say which method they were read from', () => {
 })
 
 describe('a long reconstructed run does not crowd the gap out of a bounded window', () => {
-  it('gaps come from the separately fetched observed series; the days recorded from history are counted on the gap', () => {
-    // The bounded window holds only the newest rows: two observed days and
-    // 48 history days. The observed row that opens the gap lies beyond it.
+  it('spans come from the separately fetched series: observed rows and every history day', () => {
+    // The bounded window holds only the newest rows. The full series has a
+    // 170-day stretch with no observed row, filled by history days.
     const window: SnapshotRow[] = [row('2025-10-19T12:00:00.000Z', 'observed'), row('2025-10-18T12:00:00.000Z', 'observed')]
-    for (let i = 0; i < 48; i++) {
-      const d = new Date(Date.UTC(2025, 9, 17) - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
-      window.push(row(`${d}T23:59:59.999Z`, 'history'))
-    }
     const observed = {
       snapshots: [
         row('2025-10-19T12:00:00.000Z', 'observed'),
@@ -128,30 +117,25 @@ describe('a long reconstructed run does not crowd the gap out of a bounded windo
       complete: true,
     }
     const historyDays: Array<{ observedAt: string; recordedAt: string | null }> = []
-    for (let i = 0; i < 193; i++) {
+    for (let i = 0; i < 169; i++) {
       const d = new Date(Date.UTC(2025, 9, 17) - i * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
       historyDays.push({ observedAt: `${d}T23:59:59.999Z`, recordedAt: '2025-10-19T10:00:00.000Z' })
     }
-
-    const withoutSeries = buildTimeline(window, [], false, false)
-    expect(withoutSeries.some((e) => e.kind === 'observation_gap')).toBe(false)
-
-    const timeline = buildTimeline(window, [], false, false, undefined, true, {
+    const filled = buildTimeline(window, [], false, false, undefined, true, {
       observed: { ...observed, declarations: [], declarationsComplete: true },
       historyDays,
     })
-    const gap = timeline.find((e) => e.kind === 'observation_gap')
-    expect(gap).toMatchObject({ lastObservedAt: '2025-05-01T12:00:00.000Z', observedAt: '2025-10-18T12:00:00.000Z', days: 170 })
-    expect(gap).toMatchObject({
-      recordedFromHistory: { days: 169, recordedOn: ['2025-10-19'] },
+    expect(filled.some((e) => e.kind === 'observation_gap')).toBe(false)
+
+    // Without the history days the same stretch is a span with no row.
+    const empty = buildTimeline(window, [], false, false, undefined, true, {
+      observed: { ...observed, declarations: [], declarationsComplete: true },
+      historyDays: [],
     })
-    expect(historyProvenance(historyDays)).toEqual({
-      days: 193,
-      from: '2025-04-08',
-      through: '2025-10-17',
-      recordedOn: ['2025-10-19'],
+    expect(empty.find((e) => e.kind === 'observation_gap')).toMatchObject({
+      lastObservedAt: '2025-05-01T12:00:00.000Z',
+      days: 170,
     })
-    expect(historyProvenance([])).toBeUndefined()
   })
 })
 

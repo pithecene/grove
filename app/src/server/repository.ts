@@ -42,8 +42,8 @@ import {
 import { type AccessFailure, accessFailure } from './github-state'
 import { getStewardIdentity } from './identity'
 import { isWithinScope, parseScope } from './scope'
-import type { HistoryProvenance, TimelineEntry } from './timeline'
-import { buildTimeline, historyProvenance } from './timeline'
+import type { TimelineEntry } from './timeline'
+import { buildTimeline } from './timeline'
 
 export interface RepositoryDetail {
   ecology: RepositoryEcology
@@ -55,8 +55,6 @@ export interface RepositoryDetail {
   capability?: CapabilityObservation
   ritualInvitations: RitualInvitation[]
   timeline: TimelineEntry[]
-  /** Present when any day of the series was recorded from the repository's history */
-  historyProvenance?: HistoryProvenance
 }
 
 /**
@@ -198,12 +196,13 @@ export const loadRepository = createServerFn({ method: 'GET' })
     // name this identity was observed under (the live binding was recorded by
     // the upsert above, so the current name is always included).
     // Fetch one extra row to distinguish "exactly at limit" from "truncated".
+    // The whole daily series: at most one row per day, compressed into spans,
+    // so a window would only cut the timeline off partway.
     const HISTORY_LIMIT = 50
-    const snapshotRows = getSnapshotHistoryForIdentity(repo.id, { limit: HISTORY_LIMIT + 1 })
+    const snapshots = getSnapshotHistoryForIdentity(repo.id)
     const declarationRows = getDeclarationHistoryForIdentity(repo.id, HISTORY_LIMIT + 1)
-    const historyComplete = snapshotRows.length <= HISTORY_LIMIT
+    const historyComplete = true
     const declarationHistoryComplete = declarationRows.length <= HISTORY_LIMIT
-    const snapshots = snapshotRows.slice(0, HISTORY_LIMIT)
     const declarations = declarationRows.slice(0, HISTORY_LIMIT)
     // Spans without observation are read from observed rows alone, fetched
     // on their own so that days recorded from history cannot crowd them out
@@ -252,12 +251,12 @@ export const loadRepository = createServerFn({ method: 'GET' })
     )
 
     // Observe shape and motion drift (uses already-fetched data).
-    // Pass full snapshotRows (pre-slice) so the +1 boundary row is
-    // available as a potential reference. Pass historyComplete to
-    // suppress when the phase baseline cannot be reliably established.
+    // The whole series is fetched, so every row is available as a potential
+    // reference. Pass historyComplete to suppress when the phase baseline
+    // cannot be reliably established.
     const referenceSnapshot = findReferenceSnapshot(
       phaseLastDeclaredAt,
-      snapshotRows,
+      snapshots,
       historyComplete,
     )
     const shapeDrift = referenceSnapshot
@@ -294,7 +293,6 @@ export const loadRepository = createServerFn({ method: 'GET' })
         capability,
         ritualInvitations,
         timeline,
-        historyProvenance: historyProvenance(historyDays),
       },
     }
   })

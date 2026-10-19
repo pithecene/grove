@@ -1,8 +1,7 @@
-import type { HistoryProvenance, TimelineEntry } from '../server/timeline'
+import type { TimelineEntry } from '../server/timeline'
 
 interface StructuralTimelineProps {
   timeline: TimelineEntry[]
-  provenance?: HistoryProvenance
 }
 
 const MAX_DISPLAY = 20
@@ -60,22 +59,8 @@ function describeDeclarationChange(change: {
 }
 
 /** UTC days, as "Oct 19, 2026" / "Oct 19 and Oct 21, 2026" / "a, b and c". */
-/** Date-only values are UTC days; render them as such in every time zone. */
-const utcDayFormat = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  day: 'numeric',
-  year: 'numeric',
-  timeZone: 'UTC',
-})
-
-function formatDays(days: string[]): string {
-  const names = days.map((d) => utcDayFormat.format(new Date(`${d}T00:00:00.000Z`)))
-  if (names.length <= 1) return names.join('')
-  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
-}
-
-export function StructuralTimeline({ timeline, provenance }: StructuralTimelineProps) {
-  if (timeline.length === 0 && !provenance) return null
+export function StructuralTimeline({ timeline }: StructuralTimelineProps) {
+  if (timeline.length === 0) return null
 
   const visible = timeline.slice(0, MAX_DISPLAY)
   const hiddenCount = timeline.length - visible.length
@@ -106,20 +91,6 @@ export function StructuralTimeline({ timeline, provenance }: StructuralTimelineP
           >
             {hiddenCount} earlier observation{hiddenCount !== 1 ? 's' : ''} not
             shown
-          </div>
-        )}
-
-        {provenance && (
-          <div
-            className="py-2 text-xs"
-            style={{ color: 'var(--grove-text-muted)', opacity: 0.5 }}
-          >
-            {provenance.days} {provenance.days === 1 ? 'day' : 'days'} in this series
-            {provenance.days === 1
-              ? ` (${formatDays([provenance.from])})`
-              : `, ${formatDays([provenance.from])} through ${formatDays([provenance.through])},`}{' '}
-            recorded from the repository&rsquo;s history
-            {provenance.recordedOn.length > 0 ? ` on ${formatDays(provenance.recordedOn)}` : ''}
           </div>
         )}
       </div>
@@ -155,13 +126,6 @@ function ObservationGapView({
       >
         Not observed &mdash; {formatDate(entry.lastObservedAt)} through{' '}
         {formatDate(entry.observedAt)} ({entry.days} days without observation
-        {entry.recordedFromHistory
-          ? `; ${entry.recordedFromHistory.days} of them recorded from history${
-              entry.recordedFromHistory.recordedOn.length > 0
-                ? ` on ${formatDays(entry.recordedFromHistory.recordedOn)}`
-                : ''
-            }`
-          : ''}
         )
       </div>
     </div>

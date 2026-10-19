@@ -54,9 +54,8 @@ hold when a commit joined the branch (a commit dated February may have been fast
 April) nor commits that were later force-pushed away. The reconstructed series is therefore the
 **retrospective** branch state — "what the default branch's first-parent history says the tree was
 on that day" — never the contemporaneous one. This is a stated method, recorded as
-`branch_state: retrospective` in evidence and on every row, and stated on the timeline once — in
-the provenance note and on the "Not observed" entry — rather than per entry; it is not presented
-as what Grove would have seen that day.
+`branch_state: retrospective` in evidence and on every row. On the timeline a reconstructed day is
+a day of the series like any other.
 
 Per day, the selected commit is the last commit on the default branch's **first-parent** history
 whose committer date is at or before the end of the day. A day before the repository's
@@ -89,10 +88,9 @@ Divergences from live observation, stated in evidence (`divergences`) and here:
   role and horizon. A window whose rows do not agree on role or horizon is undeterminable
   (`insufficient`): persistence is not attributed to a stratum the repository did not hold
   throughout. Phase differences are the relation itself and need no such rule.
-- **Gap rule.** Spans without observation are computed from `observed` rows only. A reconstructed
-  span never removes a "Not observed" entry; that entry states, once, how many of its days were
-  recorded from history and when. The days themselves take their place in the series like any
-  other day.
+- **Gap rule.** On the timeline, a span without rows is a span with no row of any kind; a day
+  recorded from history fills it like any other day. `/since` evidence still reports Grove's own
+  absence from observed rows only.
 - **Proposal rule.** Proposals are evaluated only when a run happens, from the windows ending that
   day. Nothing is backdated: `last_supported_at` never moves into the past and no proposal is
   created "as of" a reconstructed day.
@@ -164,12 +162,9 @@ not exceed the previous UTC day.
 - **Names.** Rows are stored under the name bound to the identity on that day; a day inside a
   rename gap with no binding is stored under the nearest later binding's name with evidence
   saying so. Because rows carry `github_id`, no binding is widened and no overlap arises.
-- **Timeline wording.** A reconstructed day is presented as a day: density spans, transitions
-  and declaration entries read the same whether the row was observed or recorded from history.
-  The timeline is about the repository; provenance is about Grove's presence and is stated once,
-  on the entry that is about presence: "Not observed — {first} through {last} ({n} days without
-  observation; {m} of them recorded from history on {recorded_at})", computed from observed rows
-  only. The method stays on every row and on every entry's data.
+- **Timeline wording.** A reconstructed day is presented as a day: density spans, transitions,
+  declaration entries and spans without rows read the same whether a row was observed or recorded
+  from history. The method stays on every row and on every entry's data.
 
 ### C. `/since` — the re-entry view
 
