@@ -58,6 +58,21 @@ describe('spans recorded from history', () => {
     expect(gaps[0]).toMatchObject({ lastObservedAt: '2025-01-01T12:00:00.000Z', days: 151 })
   })
 
+  it('a span is one recording: consecutive days recorded by different runs are separate spans', () => {
+    const rows = [
+      row('2025-01-04T23:59:59.999Z', 'history', { recordedAt: '2025-10-20T10:00:00.000Z' }),
+      row('2025-01-03T23:59:59.999Z', 'history', { recordedAt: '2025-10-20T10:00:00.000Z' }),
+      row('2025-01-02T23:59:59.999Z', 'history', { recordedAt: '2025-10-19T10:00:00.000Z' }),
+      row('2025-01-01T23:59:59.999Z', 'history', { recordedAt: '2025-10-19T10:00:00.000Z' }),
+    ]
+    expect(
+      buildHistorySpanEntries(rows).map((s) => s.kind === 'history_span' && [s.days, s.recordedAt]),
+    ).toEqual([
+      [2, '2025-10-19T10:00:00.000Z'],
+      [2, '2025-10-20T10:00:00.000Z'],
+    ])
+  })
+
   it('consecutive history days form one span entry, presented beside the gap', () => {
     const rows = [
       row('2025-06-01T12:00:00.000Z', 'observed'),

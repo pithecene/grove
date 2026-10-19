@@ -46,6 +46,21 @@ export function upsertRepository(repo: RepositoryRow, db: GroveDb = getDb()) {
 }
 
 /**
+ * Record a repository's creation time on its name row when it is not yet
+ * known (an upgraded database has none until GitHub is asked again).
+ */
+export function recordRepositoryCreation(
+  fullName: string,
+  createdAt: string,
+  db: GroveDb = getDb(),
+): void {
+  db.update(repositories)
+    .set({ createdAt })
+    .where(and(eq(repositories.fullName, fullName), isNull(repositories.createdAt)))
+    .run()
+}
+
+/**
  * Upsert multiple repositories in a single transaction.
  */
 export function upsertRepositories(repos: RepositoryRow[], db: GroveDb = getDb()) {

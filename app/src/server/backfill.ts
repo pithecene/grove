@@ -7,7 +7,7 @@ import {
   toUtcDay,
 } from '@grove/core'
 import { classifyTree, countEcosystemDependencies } from '@grove/github'
-import { and, asc, eq, gte, lte, or } from 'drizzle-orm'
+import { and, eq, gte, lte, or } from 'drizzle-orm'
 
 import type { BindingRow, GroveDb } from './db'
 import {
@@ -18,9 +18,10 @@ import {
   recordRunRepository,
   startRun,
 } from './db'
-import { declarationChanges, ecologySnapshots, repositories, repositoryBindings } from './db/schema'
+import { declarationChanges, ecologySnapshots } from './db/schema'
 import type { HistoryCommit, HistorySource } from './history/source'
-import { isWithinScope, type PortfolioScope } from './scope'
+import { listIdentities } from './identities'
+import type { PortfolioScope } from './scope'
 
 /** Version of the reconstruction algorithm, recorded on every row it writes. */
 export const RECONSTRUCTION_ALGORITHM = 'history-v1'
@@ -92,65 +93,34 @@ export function lastBackfillDay(now: Date): string {
   return shiftDay(toUtcDay(now.toISOString()), -1)
 }
 
-/**
- * One target per identity, under the name observed most recently (a
- * renamed repository keeps its former name rows, which carry a stale
- * branch). Identity comes from the repository row's id or from a binding
- * of its name — bindings are the identity mechanism for rows recorded
- * before ids were written (`designs/identity.md`).
- */
+/** One target per identity in scope (see `listIdentities`). */
 function listTargets(db: GroveDb, options: BackfillOptions): BackfillTarget[] {
-  const wanted = options.names ? new Set(options.names.map((n) => n.toLowerCase())) : undefined
-  const rows = db
-    .select({
-      githubId: repositories.githubId,
-      fullName: repositories.fullName,
-      defaultBranch: repositories.defaultBranch,
-      createdAt: repositories.createdAt,
-      lastObservedAt: repositories.lastObservedAt,
-    })
-    .from(repositories)
-    .orderBy(asc(repositories.fullName))
-    .all()
-  // The identity a name denotes most recently, for rows without an id.
-  const boundIdentity = new Map<string, number>()
-  for (const b of db.select().from(repositoryBindings).orderBy(asc(repositoryBindings.lastObservedAt)).all()) {
-    boundIdentity.set(b.fullName, b.githubId)
-  }
-  const latestByIdentity = new Map<number, { row: (typeof rows)[number]; createdAt: string | null }>()
-  for (const r of rows) {
-    const githubId = r.githubId ?? boundIdentity.get(r.fullName)
-    if (githubId === undefined) continue
-    const current = latestByIdentity.get(githubId)
-    const createdAt = r.createdAt ?? current?.createdAt ?? null
-    if (!current || r.lastObservedAt > current.row.lastObservedAt) {
-      latestByIdentity.set(githubId, { row: r, createdAt })
-    } else {
-      current.createdAt = createdAt
-    }
-  }
-  return [...latestByIdentity.entries()]
-    .map(([githubId, { row, createdAt }]) => ({
+  return listIdentities(db, options.scope, options.names).map(
+    ({ githubId, fullName, defaultBranch, createdAt }) => ({
       githubId,
-      fullName: row.fullName,
-      defaultBranch: row.defaultBranch,
+      fullName,
+      defaultBranch,
       createdAt,
-    }))
-    .filter((t) => isWithinScope(t.fullName, options.scope))
-    .filter((t) => !wanted || wanted.has(t.fullName.toLowerCase()))
-    .sort((a, b) => a.fullName.localeCompare(b.fullName))
+    }),
+  )
 }
 
-/** The name an identity held on `day`: its binding in force, else the nearest later one, else the current name. */
-function nameOn(
+type NameBasis = 'binding' | 'later_binding' | 'current_name'
+
+/**
+ * The name an identity held over [start, end]: the binding segment in force
+ * — the latest to begin when several overlap (a rename within the span) —
+ * else the nearest later one, else the current name.
+ */
+function nameOver(
   bindings: BindingRow[],
-  day: string,
+  start: string,
+  end: string,
   current: string,
-): { fullName: string; basis: 'binding' | 'later_binding' | 'current_name' } {
-  const end = dayEnd(day)
-  const start = `${day}T00:00:00.000Z`
-  // A segment that overlaps the day is in force on it.
-  const inForce = bindings.find((b) => b.firstObservedAt <= end && b.lastObservedAt >= start)
+): { fullName: string; basis: NameBasis } {
+  const inForce = bindings
+    .filter((b) => b.firstObservedAt <= end && b.lastObservedAt >= start)
+    .sort((a, b) => b.firstObservedAt.localeCompare(a.firstObservedAt))[0]
   if (inForce) return { fullName: inForce.fullName, basis: 'binding' }
   const later = bindings
     .filter((b) => b.firstObservedAt > end)
@@ -158,6 +128,14 @@ function nameOn(
   if (later) return { fullName: later.fullName, basis: 'later_binding' }
   return { fullName: current, basis: 'current_name' }
 }
+
+/** The name an identity held on `day`. */
+const nameOn = (bindings: BindingRow[], day: string, current: string) =>
+  nameOver(bindings, `${day}T00:00:00.000Z`, dayEnd(day), current)
+
+/** The name an identity held at `instant` (a commit). */
+const nameAt = (bindings: BindingRow[], instant: string, current: string) =>
+  nameOver(bindings, instant, instant, current)
 
 /** Days in [from, to] that already have a snapshot of either method for the identity. */
 function daysWithSnapshot(db: GroveDb, target: BackfillTarget, from: string, to: string): Set<string> {
@@ -196,38 +174,13 @@ function daysWithSnapshot(db: GroveDb, target: BackfillTarget, from: string, to:
  */
 function ecosystemNamesOn(db: GroveDb, day: string, scope: PortfolioScope | undefined): string[] | undefined {
   const end = dayEnd(day)
-  const rows = db
-    .select({
-      githubId: repositories.githubId,
-      fullName: repositories.fullName,
-      createdAt: repositories.createdAt,
-      lastObservedAt: repositories.lastObservedAt,
-    })
-    .from(repositories)
-    .all()
-    .filter((r) => isWithinScope(r.fullName, scope))
-  // One row per identity (a renamed repository keeps its former name rows);
-  // creation is known if any of its rows carries it.
-  const byIdentity = new Map<number | string, { name: string; createdAt: string | null; githubId: number | null; last: string }>()
-  for (const r of rows) {
-    const key = r.githubId ?? `name:${r.fullName}`
-    const current = byIdentity.get(key)
-    const createdAt = r.createdAt ?? current?.createdAt ?? null
-    if (!current || r.lastObservedAt > current.last) {
-      byIdentity.set(key, { name: r.fullName, createdAt, githubId: r.githubId, last: r.lastObservedAt })
-    } else if (createdAt && !current.createdAt) {
-      current.createdAt = createdAt
-    }
-  }
+  // One member per identity, former names resolved through bindings and
+  // creation taken from whichever row carries it (`listIdentities`).
   const names: string[] = []
-  for (const member of byIdentity.values()) {
+  for (const member of listIdentities(db, scope)) {
     if (!member.createdAt) return undefined
     if (member.createdAt > end) continue
-    names.push(
-      member.githubId === null
-        ? member.name
-        : nameOn(getBindingsForIdentity(member.githubId, db), day, member.name).fullName,
-    )
+    names.push(nameOn(getBindingsForIdentity(member.githubId, db), day, member.fullName).fullName)
   }
   return names
 }
@@ -551,7 +504,7 @@ async function reconstructTarget(
       for (const { commit, declaration: declared } of dayDeclarations) {
         db.insert(declarationChanges)
           .values({
-            fullName: name.fullName,
+            fullName: nameAt(bindings, commit.committedAt, target.fullName).fullName,
             githubId: target.githubId,
             observedAt: commit.committedAt,
             method: 'history',

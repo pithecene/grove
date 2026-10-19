@@ -54,6 +54,7 @@ export {
   getPortfolioCalendarWindow,
   getPortfolioSnapshotWindow,
   getSnapshotHistory,
+  recordRepositoryCreation,
   recordSnapshot,
   recordSnapshotBatch,
   upsertRepositories,

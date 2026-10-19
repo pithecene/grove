@@ -266,6 +266,44 @@ describe('backfillHistory', () => {
     expect(jan4?.ecosystemDependencyCount).toBeNull()
   })
 
+  it('a rename within one day puts the day under the later name; declarations go by their commit instant', async () => {
+    seedRepository('2024-06-01T00:00:00.000Z', 'orchard/new', 100)
+    db.insert(repositories)
+      .values({ fullName: 'orchard/old', htmlUrl: 'https://github.com/orchard/old', defaultBranch: 'main', lastObservedAt: '2025-01-02T08:00:00.000Z' })
+      .run()
+    recordObservedBinding(100, 'orchard/old', '2025-01-02T08:00:00.000Z', db)
+    recordObservedBinding(100, 'orchard/new', '2025-01-02T16:00:00.000Z', db)
+    // The day's rows would be deduped by the existing observed rows; use the next day for the snapshot
+    // and the rename day for declaration commits.
+    const source = new FakeSource([
+      commit('c1', '2025-01-02T07:00:00.000Z', { '.grove.yaml': yaml('expanding') }),
+      commit('c2', '2025-01-02T18:00:00.000Z', { '.grove.yaml': yaml('consolidating') }),
+    ])
+    await backfillHistory(db, { from: '2025-01-02', to: '2025-01-02', apply: true, sourceFor: async () => source, now: NOW })
+    const snapshot = db.select().from(ecologySnapshots).all().find((r) => r.method === 'history')
+    expect(snapshot?.fullName).toBe('orchard/new')
+    expect(db.select().from(declarationChanges).all().map((d) => [d.observedAt.slice(11, 13), d.fullName])).toEqual([
+      ['07', 'orchard/old'],
+      ['18', 'orchard/new'],
+    ])
+  })
+
+  it('a former-name row without an id does not make the ecosystem unknown', async () => {
+    seedRepository('2024-06-01T00:00:00.000Z', 'orchard/new', 100)
+    // Legacy former-name row: no id, no creation time, bound to the identity.
+    db.insert(repositories)
+      .values({ fullName: 'orchard/old', htmlUrl: 'https://github.com/orchard/old', defaultBranch: 'main', lastObservedAt: '2024-12-01T00:00:00.000Z' })
+      .run()
+    recordObservedBinding(100, 'orchard/old', '2024-12-01T00:00:00.000Z', db)
+    seedRepository('2024-06-01T00:00:00.000Z', 'orchard/beta', 200)
+    const source = new FakeSource([
+      commit('c1', '2025-01-01T10:00:00.000Z', { 'package.json': '{"dependencies":{"beta":"1"}}' }),
+    ])
+    await backfillHistory(db, { from: '2025-01-02', to: '2025-01-02', apply: true, names: ['orchard/new'], sourceFor: async () => source, now: NOW })
+    const row = db.select().from(ecologySnapshots).all().find((r) => r.githubId === 100)
+    expect(row?.ecosystemDependencyCount).toBe(1)
+  })
+
   it('a repository known only through a binding is a target', async () => {
     // Upgraded database: the repository row has no id, but the identity
     // backfill bound the name.

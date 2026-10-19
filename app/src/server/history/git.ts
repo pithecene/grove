@@ -3,7 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 
-import { fetchRepository, type TreeEntry } from '@grove/github'
+import { fetchRepository, type GitHubRepo, type TreeEntry } from '@grove/github'
 
 import type { HistoryCommit, HistorySource } from './source'
 
@@ -14,7 +14,12 @@ import type { HistoryCommit, HistorySource } from './source'
  * wrong repository (`docs/designs/identity.md` §2). GitHub's answer also
  * supplies the current name (redirects followed) and default branch.
  */
-export async function openIdentityHistory(options: GitHistoryOptions): Promise<GitHistorySource> {
+export async function openIdentityHistory(
+  options: GitHistoryOptions & {
+    /** Receives what GitHub answered about the repository once its identity is confirmed */
+    onVerified?: (repo: GitHubRepo) => void
+  },
+): Promise<GitHistorySource> {
   const answer = await fetchRepository(options.token, options.fullName)
   if (answer.kind !== 'ok') {
     throw new Error(`GitHub gave no repository for ${options.fullName}: ${answer.kind}`)
@@ -24,6 +29,7 @@ export async function openIdentityHistory(options: GitHistoryOptions): Promise<G
       `${options.fullName} now denotes repository ${answer.value.id}, not ${options.githubId}; history not read`,
     )
   }
+  options.onVerified?.(answer.value)
   return GitHistorySource.open({
     ...options,
     fullName: answer.value.full_name,

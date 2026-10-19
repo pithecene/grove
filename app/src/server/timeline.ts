@@ -266,9 +266,13 @@ export function buildHistorySpanEntries(
   }
   for (const item of asc) {
     if (last && item.day === last.day) continue
+    // A span is one recording as well as one run of days: a later backfill
+    // that continued an earlier one starts a new span, so each carries the
+    // date it was actually recorded on.
     const consecutive =
       last !== undefined &&
-      new Date(item.day).getTime() - new Date(last.day).getTime() === MS_PER_DAY
+      new Date(item.day).getTime() - new Date(last.day).getTime() === MS_PER_DAY &&
+      item.row.recordedAt === last.row.recordedAt
     if (!consecutive) {
       flush()
       start = item

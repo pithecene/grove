@@ -15,7 +15,7 @@
 import { resolve } from 'node:path'
 
 import { backfillHistory, DIVERGENCES, lastBackfillDay } from '../src/server/backfill'
-import { getDb } from '../src/server/db'
+import { getDb, recordRepositoryCreation } from '../src/server/db'
 import { openIdentityHistory } from '../src/server/history/git'
 import { parseScope } from '../src/server/scope'
 
@@ -87,6 +87,15 @@ const report = await backfillHistory(db, {
       fullName: target.fullName,
       defaultBranch: target.defaultBranch,
       token,
+      // The verification answer carries the creation time; an upgraded
+      // database has none until a live collection records it, so keep it
+      // here and let this run use it.
+      onVerified: (repo) => {
+        if (repo.created_at) {
+          recordRepositoryCreation(target.fullName, repo.created_at, db)
+          target.createdAt = repo.created_at
+        }
+      },
     }),
 })
 
