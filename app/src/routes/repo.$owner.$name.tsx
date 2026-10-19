@@ -42,6 +42,17 @@ function RepositoryDetailPage() {
     )
   }
 
+  // The token was accepted when the session was checked but refused on this
+  // request: it has been revoked or has expired since.
+  if (lookup.kind === 'token_rejected') {
+    return (
+      <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
+        <Header />
+        <EmptyState reason="rejected" />
+      </div>
+    )
+  }
+
   if (lookup.kind !== 'observed') {
     return (
       <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>

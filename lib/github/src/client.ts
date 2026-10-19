@@ -128,8 +128,10 @@ export async function fetchGroveYaml(
   if (response.status === 404) return undefined
 
   if (!response.ok) {
-    throw new Error(
-      `GitHub API error: ${response.status} ${response.statusText}`,
+    throw new GitHubApiError(
+      response.status,
+      response.statusText,
+      isRateLimitResponse(response.status, response.headers),
     )
   }
 

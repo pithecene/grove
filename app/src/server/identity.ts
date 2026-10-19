@@ -90,6 +90,15 @@ export async function resolveStewardIdentity(): Promise<IdentityResolution> {
 }
 
 /**
+ * Forget the cached identity. Called when GitHub answers 401 to a later
+ * request: the token has been revoked or has expired since it was verified,
+ * and the next session check must ask GitHub again.
+ */
+export function invalidateStewardIdentity(): void {
+  cached = undefined
+}
+
+/**
  * The steward's identity, or undefined when none is available (no token,
  * a token GitHub refused, or GitHub unreachable) — callers degrade to the
  * unauthenticated state rather than crashing route loaders.

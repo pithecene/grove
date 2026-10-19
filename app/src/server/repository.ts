@@ -34,7 +34,7 @@ import {
   recordSnapshot,
   upsertRepository,
 } from './db'
-import { getStewardIdentity } from './identity'
+import { getStewardIdentity, invalidateStewardIdentity } from './identity'
 import type { TimelineEntry } from './timeline'
 import { buildTimeline } from './timeline'
 
@@ -60,6 +60,37 @@ export type RepositoryLookup =
   | { kind: 'not_accessible'; status: number }
   /** GitHub gave no usable answer: rate limit, server error or network failure */
   | { kind: 'unavailable'; status?: number }
+  /** The token was accepted at the session check but refused on this request (401) */
+  | { kind: 'token_rejected' }
+
+/**
+ * Map a failed GitHub request to what the page can state. Anything that is
+ * neither a GitHub answer nor a network failure is rethrown: that is a defect,
+ * not a condition to report.
+ */
+function lookupFailure(err: unknown, fullName: string): RepositoryLookup {
+  if (err instanceof GitHubApiError) {
+    if (err.status === 401) {
+      // Revoked or expired since the session check verified it.
+      invalidateStewardIdentity()
+      return { kind: 'token_rejected' }
+    }
+    // A decision about access (404/403 that is not throttling) means there
+    // is nothing to observe; throttling and server errors mean GitHub gave
+    // no usable answer this time.
+    if (!err.rateLimited && (err.status === 404 || err.status === 403)) {
+      return { kind: 'not_accessible', status: err.status }
+    }
+    console.warn(`[grove] GitHub gave no usable answer for ${fullName} (${err.status}).`)
+    return { kind: 'unavailable', status: err.status }
+  }
+  if (err instanceof TypeError) {
+    // fetch rejects with a TypeError when the network fails
+    console.warn(`[grove] Failed to reach GitHub for ${fullName}:`, err)
+    return { kind: 'unavailable' }
+  }
+  throw err
+}
 
 export const loadRepository = createServerFn({ method: 'GET' })
   .inputValidator((data: { owner: string; name: string }) => data)
@@ -77,18 +108,7 @@ export const loadRepository = createServerFn({ method: 'GET' })
     try {
       repo = await fetchRepository(token, fullName)
     } catch (err: unknown) {
-      // A decision about access (404/403 that is not throttling) means there
-      // is nothing to observe; throttling, server errors and network failures
-      // mean GitHub gave no usable answer this time.
-      if (err instanceof GitHubApiError) {
-        if (!err.rateLimited && (err.status === 404 || err.status === 403)) {
-          return { kind: 'not_accessible', status: err.status }
-        }
-        console.warn(`[grove] GitHub gave no usable answer for ${fullName} (${err.status}).`)
-        return { kind: 'unavailable', status: err.status }
-      }
-      console.warn(`[grove] Failed to reach GitHub for ${fullName}:`, err)
-      return { kind: 'unavailable' }
+      return lookupFailure(err, fullName)
     }
 
     // Classify and fetch structural signals in parallel.
@@ -98,10 +118,18 @@ export const loadRepository = createServerFn({ method: 'GET' })
     // The entanglement factor is weighted at 0.15 — omitting it may
     // produce a slightly lower tier than the portfolio view in rare
     // cases, but avoids disproportionate API cost for a single-repo view.
-    const [ecology, signals] = await Promise.all([
-      classifyRepository(token, repo),
-      fetchStructuralSignals(token, fullName, repo.default_branch),
-    ])
+    // Reading `.grove.yaml` is a further GitHub request and can fail the
+    // same ways; structural signals already treat partial results as valid.
+    let ecology: Awaited<ReturnType<typeof classifyRepository>>
+    let signals: Awaited<ReturnType<typeof fetchStructuralSignals>>
+    try {
+      ;[ecology, signals] = await Promise.all([
+        classifyRepository(token, repo),
+        fetchStructuralSignals(token, fullName, repo.default_branch),
+      ])
+    } catch (err: unknown) {
+      return lookupFailure(err, fullName)
+    }
 
     // Observe consolidation interval
     const lastActivityDate = repo.pushed_at
