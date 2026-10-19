@@ -113,7 +113,7 @@ export async function fetchUserRepos(token: string): Promise<GitHubAnswer<GitHub
   const repos: GitHubRepo[] = []
   let page = 1
   const perPage = 100
-  let status = 200
+  let status: number
 
   while (true) {
     const pageAnswer = await answer(

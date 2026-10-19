@@ -55,7 +55,7 @@ export async function resolveStewardIdentity(): Promise<IdentityResolution> {
 
   // Concurrent checks on a cold cache (a route loading its session and its
   // data at once) share one request, so they cannot disagree about the token.
-  if (inflight && inflight.token === token) return inflight.promise
+  if (inflight && inflight.token === token) return await inflight.promise
   const promise = verify(token)
   inflight = { token, promise }
   try {
