@@ -5,6 +5,7 @@ import { CapabilityDisplay } from '../components/CapabilityDisplay'
 import { ConsolidationDisplay } from '../components/ConsolidationDisplay'
 import { DensityDisplay } from '../components/DensityDisplay'
 import { DriftDisplay } from '../components/DriftDisplay'
+import { EmptyState } from '../components/EmptyState'
 import { Header } from '../components/Header'
 import { StructuralTimeline } from '../components/StructuralTimeline'
 import { PhaseIndicator } from '../components/PhaseIndicator'
@@ -15,19 +16,66 @@ import { loadRepository } from '../server/repository'
 export const Route = createFileRoute('/repo/$owner/$name')({
   component: RepositoryDetailPage,
   loader: async ({ params }) => {
-    const [session, detail] = await Promise.all([
-      getSession(),
-      loadRepository({
-        data: { owner: params.owner, name: params.name },
-      }),
-    ])
-    return { session, detail }
+    // Resolve the session first: with no token, or an invalid/expired one,
+    // the repository loader cannot observe anything. Degrade to the same
+    // unauthenticated state the portfolio page shows instead of throwing.
+    const session = await getSession()
+    if (!session.authenticated) {
+      return { session, lookup: undefined }
+    }
+    const lookup = await loadRepository({
+      data: { owner: params.owner, name: params.name },
+    })
+    return { session, lookup }
   },
 })
 
 function RepositoryDetailPage() {
-  const { session, detail } = Route.useLoaderData()
-  const { ecology, consolidation, phaseDuration, shapeDrift, motionDrift, accessibility, capability, ritualInvitations, timeline } = detail
+  const { session, lookup } = Route.useLoaderData()
+
+  if (!session.authenticated || !lookup) {
+    return (
+      <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
+        <Header />
+        <EmptyState reason={session.reason} />
+      </div>
+    )
+  }
+
+  // The token was accepted when the session was checked but refused on this
+  // request: it has been revoked or has expired since.
+  if (lookup.kind === 'token_rejected') {
+    return (
+      <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
+        <Header />
+        <EmptyState reason="rejected" />
+      </div>
+    )
+  }
+
+  if (lookup.kind !== 'observed') {
+    return (
+      <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
+        <Header login={session.login} />
+        <main className="px-8 py-8">
+          <Link
+            to="/"
+            className="text-sm mb-6 inline-block"
+            style={{ color: 'var(--grove-text-muted)' }}
+          >
+            &larr; Portfolio
+          </Link>
+          <p className="text-sm" style={{ color: 'var(--grove-text-muted)' }}>
+            {lookup.kind === 'not_accessible'
+              ? 'This repository was not found or is not accessible with the configured token.'
+              : 'GitHub gave no usable answer for this repository this time (unreachable, unavailable or rate-limited). Nothing was observed.'}
+          </p>
+        </main>
+      </div>
+    )
+  }
+
+  const { ecology, consolidation, phaseDuration, shapeDrift, motionDrift, accessibility, capability, ritualInvitations, timeline } = lookup.detail
 
   const seasonAttr = ecology.season?.season
 
