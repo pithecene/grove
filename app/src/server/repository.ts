@@ -93,7 +93,7 @@ function lookupFailure(err: unknown, fullName: string): RepositoryLookup {
 }
 
 export const loadRepository = createServerFn({ method: 'GET' })
-  .inputValidator((data: { owner: string; name: string }) => data)
+  .validator((data: { owner: string; name: string }) => data)
   .handler(async ({ data }): Promise<RepositoryLookup> => {
     const identity = await getStewardIdentity()
 

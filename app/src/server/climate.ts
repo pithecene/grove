@@ -20,7 +20,7 @@ export const getClimate = createServerFn({ method: 'GET' }).handler(
 )
 
 export const declareClimate = createServerFn({ method: 'POST' })
-  .inputValidator((data: { climate: Climate }) => {
+  .validator((data: { climate: Climate }) => {
     if (!CLIMATES.includes(data.climate)) {
       throw new Error(`Invalid climate: ${data.climate}`)
     }
