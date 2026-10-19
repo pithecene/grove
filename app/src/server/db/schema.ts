@@ -186,3 +186,48 @@ export const climateProposals = sqliteTable('climate_proposals', {
    */
   sourceRepositories: text('source_repositories'),
 })
+
+/**
+ * One row per collection — a page visit, an explicit `collect`, or a
+ * backfill: the record of what Grove attempted and when. Never a metric.
+ */
+export const collectionRuns = sqliteTable('collection_runs', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  startedAt: text('started_at').notNull(),
+  finishedAt: text('finished_at'),
+  /** 'visit' | 'cli' | 'backfill' */
+  method: text('method').notNull(),
+  stewardId: integer('steward_id'),
+  /** The run targeted the whole configured scope, not one repository or a named subset */
+  fullPortfolio: integer('full_portfolio', { mode: 'boolean' }).notNull(),
+  /** Every targeted repository received an outcome row */
+  complete: integer('complete', { mode: 'boolean' }).notNull().default(false),
+  /** GitHub answer kind when the run could not proceed as a whole (e.g. the listing) */
+  answer: text('answer'),
+  /** JSON `{ owners, exclude }` of the configured scope at the time, when any */
+  scope: text('scope'),
+})
+
+/**
+ * One row per repository a run was about: present and observed, present
+ * but within the snapshot throttle (`unchanged`), not answered by GitHub
+ * (`unavailable`, with the answer kind), or answered but not recorded
+ * because the run ended incomplete (`not_recorded`). Membership is explicit
+ * so a targeted run never implies absence of the rest.
+ */
+export const collectionRunRepositories = sqliteTable(
+  'collection_run_repositories',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    runId: integer('run_id')
+      .notNull()
+      .references(() => collectionRuns.id),
+    githubId: integer('github_id'),
+    fullName: text('full_name').notNull(),
+    /** 'observed' | 'unchanged' | 'unavailable' | 'not_recorded' */
+    outcome: text('outcome').notNull(),
+    /** GitHub answer kind when `unavailable` */
+    answer: text('answer'),
+  },
+  (table) => [index('idx_run_repositories_run').on(table.runId)],
+)

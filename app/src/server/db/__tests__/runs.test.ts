@@ -1,0 +1,82 @@
+import Database from 'better-sqlite3'
+import { beforeEach, describe, expect, it } from 'vitest'
+
+import { createDb, type GroveDb } from '../client'
+import {
+  finishRun,
+  getLatestCompleteFullRun,
+  getRun,
+  getRunRepositories,
+  recordRunRepository,
+  startRun,
+} from '../runs'
+
+let db: GroveDb
+
+beforeEach(() => {
+  db = createDb(new Database(':memory:'))
+})
+
+describe('collection runs', () => {
+  it('records a run, what it was about, and how it ended', () => {
+    const id = startRun(
+      {
+        method: 'cli',
+        stewardId: 7,
+        fullPortfolio: true,
+        scope: { owners: new Set(['orchard']), exclude: new Set(['orchard/hidden']) },
+        startedAt: '2025-01-01T12:00:00.000Z',
+      },
+      db,
+    )
+    recordRunRepository(id, { githubId: 100, fullName: 'orchard/alpha', outcome: 'observed' }, db)
+    recordRunRepository(id, { githubId: 200, fullName: 'orchard/beta', outcome: 'unchanged' }, db)
+    recordRunRepository(
+      id,
+      { githubId: 300, fullName: 'orchard/gamma', outcome: 'unavailable', answer: 'forbidden' },
+      db,
+    )
+    finishRun(id, { complete: true, finishedAt: '2025-01-01T12:00:05.000Z' }, db)
+
+    expect(getRun(id, db)).toMatchObject({
+      method: 'cli',
+      stewardId: 7,
+      fullPortfolio: true,
+      complete: true,
+      answer: null,
+      scope: JSON.stringify({ owners: ['orchard'], exclude: ['orchard/hidden'] }),
+      finishedAt: '2025-01-01T12:00:05.000Z',
+    })
+    expect(getRunRepositories(id, db).map((r) => [r.fullName, r.outcome, r.answer])).toEqual([
+      ['orchard/alpha', 'observed', null],
+      ['orchard/beta', 'unchanged', null],
+      ['orchard/gamma', 'unavailable', 'forbidden'],
+    ])
+  })
+
+  it('only a complete run over the whole scope counts as the latest full run', () => {
+    const full = startRun(
+      { method: 'cli', fullPortfolio: true, startedAt: '2025-01-01T12:00:00.000Z' },
+      db,
+    )
+    finishRun(full, { complete: true }, db)
+    const targeted = startRun(
+      { method: 'visit', fullPortfolio: false, startedAt: '2025-01-02T12:00:00.000Z' },
+      db,
+    )
+    finishRun(targeted, { complete: true }, db)
+    const interrupted = startRun(
+      { method: 'cli', fullPortfolio: true, startedAt: '2025-01-03T12:00:00.000Z' },
+      db,
+    )
+    finishRun(interrupted, { complete: false, answer: 'throttled' }, db)
+
+    expect(getLatestCompleteFullRun(db)?.id).toBe(full)
+  })
+
+  it('a run with no scope records none', () => {
+    const id = startRun({ method: 'visit', fullPortfolio: false }, db)
+    expect(getRun(id, db)?.scope).toBeNull()
+    expect(getRun(id, db)?.finishedAt).toBeNull()
+  })
+})
