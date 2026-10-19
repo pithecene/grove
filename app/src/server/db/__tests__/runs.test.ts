@@ -54,24 +54,35 @@ describe('collection runs', () => {
     ])
   })
 
-  it('only a complete run over the whole scope counts as the latest full run', () => {
+  it('only a complete live run over the whole scope by this steward counts as the latest full run', () => {
     const full = startRun(
-      { method: 'cli', fullPortfolio: true, startedAt: '2025-01-01T12:00:00.000Z' },
+      { method: 'cli', stewardId: 7, fullPortfolio: true, startedAt: '2025-01-01T12:00:00.000Z' },
       db,
     )
     finishRun(full, { complete: true }, db)
     const targeted = startRun(
-      { method: 'visit', fullPortfolio: false, startedAt: '2025-01-02T12:00:00.000Z' },
+      { method: 'visit', stewardId: 7, fullPortfolio: false, startedAt: '2025-01-02T12:00:00.000Z' },
       db,
     )
     finishRun(targeted, { complete: true }, db)
     const interrupted = startRun(
-      { method: 'cli', fullPortfolio: true, startedAt: '2025-01-03T12:00:00.000Z' },
+      { method: 'cli', stewardId: 7, fullPortfolio: true, startedAt: '2025-01-03T12:00:00.000Z' },
       db,
     )
     finishRun(interrupted, { complete: false, answer: 'throttled' }, db)
+    const backfill = startRun(
+      { method: 'backfill', stewardId: 7, fullPortfolio: true, startedAt: '2025-01-04T12:00:00.000Z' },
+      db,
+    )
+    finishRun(backfill, { complete: true }, db)
+    const someoneElse = startRun(
+      { method: 'cli', stewardId: 8, fullPortfolio: true, startedAt: '2025-01-05T12:00:00.000Z' },
+      db,
+    )
+    finishRun(someoneElse, { complete: true }, db)
 
-    expect(getLatestCompleteFullRun(db)?.id).toBe(full)
+    expect(getLatestCompleteFullRun(7, db)?.id).toBe(full)
+    expect(getLatestCompleteFullRun(9, db)).toBeUndefined()
   })
 
   it('a run with no scope records none', () => {

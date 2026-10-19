@@ -84,21 +84,24 @@ export const loadRepository = createServerFn({ method: 'GET' })
 
     // A detail page is a collection about one repository: a run that
     // targets a single name, so it never implies anything about the rest.
-    // It is opened once something is actually attempted; a redirect that
-    // leads outside the scope attempts nothing and leaves no run.
+    // It is opened once something is actually attempted (a redirect that
+    // leads outside the scope attempts nothing and leaves no run), but it
+    // is dated from the moment the collection began.
+    const startedAt = new Date().toISOString()
     const openRun = () =>
-      startRun({ method: 'visit', stewardId: identity.id, fullPortfolio: false, scope })
-    // The run keeps what GitHub actually answered (the evidence); the page
-    // gets the mapped state.
+      startRun({ method: 'visit', stewardId: identity.id, fullPortfolio: false, scope, startedAt })
+    // The run keeps what GitHub actually answered (the evidence) under the
+    // name GitHub resolved; the page gets the mapped state.
     const unavailable = (
       runId: number,
       failure: GitHubFailure,
       subject: string,
+      resolvedName: string,
       githubId?: number,
     ): AccessFailure => {
       recordRunRepository(runId, {
         githubId,
-        fullName,
+        fullName: resolvedName,
         outcome: 'unavailable',
         answer: failure.kind,
       })
@@ -111,7 +114,7 @@ export const loadRepository = createServerFn({ method: 'GET' })
 
     const repoAnswer = await fetchRepository(token, fullName)
     if (repoAnswer.kind !== 'ok') {
-      return unavailable(openRun(), repoAnswer, 'this repository')
+      return unavailable(openRun(), repoAnswer, 'this repository', fullName)
     }
     const repo = repoAnswer.value
     // GitHub follows renames/transfers with a redirect: the resolved
@@ -134,7 +137,13 @@ export const loadRepository = createServerFn({ method: 'GET' })
       fetchStructuralSignals(token, fullName, repo.default_branch),
     ])
     if (ecologyAnswer.kind !== 'ok') {
-      return unavailable(runId, ecologyAnswer, `the declaration of ${repo.full_name}`, repo.id)
+      return unavailable(
+        runId,
+        ecologyAnswer,
+        `the declaration of ${repo.full_name}`,
+        repo.full_name,
+        repo.id,
+      )
     }
     const ecology = ecologyAnswer.value
 

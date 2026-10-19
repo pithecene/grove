@@ -1,4 +1,4 @@
-import { and, asc, desc, eq } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 
 import type { PortfolioScope } from '../scope'
 import type { GroveDb } from './client'
@@ -101,15 +101,27 @@ export function getRunRepositories(runId: number, db: GroveDb = getDb()): RunRep
 }
 
 /**
- * The most recent run that targeted the whole configured scope and gave
- * every repository an outcome — the only kind of run from which "not
- * present any more" may be inferred.
+ * The most recent *live* run (`visit` or `cli`) by this steward that
+ * targeted the whole configured scope and gave every repository an
+ * outcome — the only kind of run from which "not present any more" may
+ * be inferred. A backfill reads history and says nothing about presence;
+ * another steward's run describes another portfolio.
  */
-export function getLatestCompleteFullRun(db: GroveDb = getDb()): RunRow | undefined {
+export function getLatestCompleteFullRun(
+  stewardId: number,
+  db: GroveDb = getDb(),
+): RunRow | undefined {
   return db
     .select()
     .from(collectionRuns)
-    .where(and(eq(collectionRuns.fullPortfolio, true), eq(collectionRuns.complete, true)))
+    .where(
+      and(
+        eq(collectionRuns.stewardId, stewardId),
+        eq(collectionRuns.fullPortfolio, true),
+        eq(collectionRuns.complete, true),
+        inArray(collectionRuns.method, ['visit', 'cli']),
+      ),
+    )
     .orderBy(desc(collectionRuns.startedAt), desc(collectionRuns.id))
     .limit(1)
     .get()
