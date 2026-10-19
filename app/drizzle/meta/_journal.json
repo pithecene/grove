@@ -64,6 +64,13 @@
       "when": 1792383389170,
       "tag": "0008_repository_created_at",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792386559098,
+      "tag": "0009_comparison_references",
+      "breakpoints": true
     }
   ]
 }

@@ -174,9 +174,9 @@ Route `/since`, linked from the overview; the overview itself is unchanged.
 - **Reference.** A steward-chosen prior instant. `comparison_references` (`steward_id`,
   `reference_at`, `saved_at`, `label` nullable), append-only, explicit save ("Keep this point as a
   reference"), never created by opening a page.
-- **Default** when none is saved: the start of the most recent observed stretch after an
-  observation gap of 14 days or more (the point of return), else the earliest observation; shown
-  as a default.
+- **Default** when none is saved: the last observation before the most recent span of 14 days or
+  more without observation — what Grove last saw before the absence, so the comparison spans the
+  absence and everything since — else the earliest observation; shown as a default.
 - **As-of rule.** "At the reference" means, per identity, the latest row with `observed_at` at
   or before `reference_at`; on the same day an `observed` row takes precedence over a `history`
   one; a later row is never selected. An identity with no row at or before the reference is

@@ -207,6 +207,19 @@ export const climateProposals = sqliteTable('climate_proposals', {
 })
 
 /**
+ * A steward-chosen prior instant to compare against on `/since`. Saved
+ * explicitly, append-only; never created by opening a page. Navigation
+ * state, not ritual participation (`CONTRACT_NON_PRESCRIPTIVE`).
+ */
+export const comparisonReferences = sqliteTable('comparison_references', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  stewardId: integer('steward_id').notNull(),
+  referenceAt: text('reference_at').notNull(),
+  savedAt: text('saved_at').notNull(),
+  label: text('label'),
+})
+
+/**
  * One row per collection — a page visit, an explicit `collect`, or a
  * backfill: the record of what Grove attempted and when. Never a metric.
  */

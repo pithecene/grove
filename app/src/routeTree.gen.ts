@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SinceRouteImport } from './routes/since'
 import { Route as UnclassifiedRouteImport } from './routes/unclassified'
 import { Route as DemoIndexRouteImport } from './routes/demo.index'
 import { Route as RepoOwnerNameRouteImport } from './routes/repo.$owner.$name'
@@ -18,6 +19,11 @@ import { Route as DemoRepoOwnerNameRouteImport } from './routes/demo.repo.$owner
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SinceRoute = SinceRouteImport.update({
+  id: '/since',
+  path: '/since',
   getParentRoute: () => rootRouteImport,
 } as any)
 const UnclassifiedRoute = UnclassifiedRouteImport.update({
@@ -43,6 +49,7 @@ const DemoRepoOwnerNameRoute = DemoRepoOwnerNameRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/since': typeof SinceRoute
   '/unclassified': typeof UnclassifiedRoute
   '/demo/': typeof DemoIndexRoute
   '/repo/$owner/$name': typeof RepoOwnerNameRoute
@@ -50,6 +57,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/since': typeof SinceRoute
   '/unclassified': typeof UnclassifiedRoute
   '/demo': typeof DemoIndexRoute
   '/repo/$owner/$name': typeof RepoOwnerNameRoute
@@ -58,6 +66,7 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/since': typeof SinceRoute
   '/unclassified': typeof UnclassifiedRoute
   '/demo/': typeof DemoIndexRoute
   '/repo/$owner/$name': typeof RepoOwnerNameRoute
@@ -67,6 +76,7 @@ export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
+    | '/since'
     | '/unclassified'
     | '/demo/'
     | '/repo/$owner/$name'
@@ -74,6 +84,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/since'
     | '/unclassified'
     | '/demo'
     | '/repo/$owner/$name'
@@ -81,6 +92,7 @@ export interface FileRouteTypes {
   id:
     | '__root__'
     | '/'
+    | '/since'
     | '/unclassified'
     | '/demo/'
     | '/repo/$owner/$name'
@@ -89,6 +101,7 @@ export interface FileRouteTypes {
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  SinceRoute: typeof SinceRoute
   UnclassifiedRoute: typeof UnclassifiedRoute
   DemoIndexRoute: typeof DemoIndexRoute
   RepoOwnerNameRoute: typeof RepoOwnerNameRoute
@@ -102,6 +115,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/since': {
+      id: '/since'
+      path: '/since'
+      fullPath: '/since'
+      preLoaderRoute: typeof SinceRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/unclassified': {
@@ -137,6 +157,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  SinceRoute: SinceRoute,
   UnclassifiedRoute: UnclassifiedRoute,
   DemoIndexRoute: DemoIndexRoute,
   RepoOwnerNameRoute: RepoOwnerNameRoute,

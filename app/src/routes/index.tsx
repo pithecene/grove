@@ -200,6 +200,16 @@ function PortfolioPage() {
             </Link>
           </div>
         )}
+
+        <div className="mt-6">
+          <Link
+            to="/since"
+            className="text-sm"
+            style={{ color: 'var(--grove-text-muted)' }}
+          >
+            What changed since a reference &rarr;
+          </Link>
+        </div>
       </main>
     </div>
   )
