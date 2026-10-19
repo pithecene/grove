@@ -21,19 +21,19 @@ export const Route = createFileRoute('/repo/$owner/$name')({
     // unauthenticated state the portfolio page shows instead of throwing.
     const session = await getSession()
     if (!session.authenticated) {
-      return { session, detail: undefined }
+      return { session, lookup: undefined }
     }
-    const detail = await loadRepository({
+    const lookup = await loadRepository({
       data: { owner: params.owner, name: params.name },
     })
-    return { session, detail }
+    return { session, lookup }
   },
 })
 
 function RepositoryDetailPage() {
-  const { session, detail } = Route.useLoaderData()
+  const { session, lookup } = Route.useLoaderData()
 
-  if (!session.authenticated) {
+  if (!session.authenticated || !lookup) {
     return (
       <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
         <Header />
@@ -42,7 +42,7 @@ function RepositoryDetailPage() {
     )
   }
 
-  if (!detail) {
+  if (lookup.kind !== 'observed') {
     return (
       <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
         <Header login={session.login} />
@@ -55,14 +55,16 @@ function RepositoryDetailPage() {
             &larr; Portfolio
           </Link>
           <p className="text-sm" style={{ color: 'var(--grove-text-muted)' }}>
-            This repository was not found or is not accessible with the configured token.
+            {lookup.kind === 'not_accessible'
+              ? 'This repository was not found or is not accessible with the configured token.'
+              : 'GitHub gave no usable answer for this repository this time (unreachable, unavailable or rate-limited). Nothing was observed.'}
           </p>
         </main>
       </div>
     )
   }
 
-  const { ecology, consolidation, phaseDuration, shapeDrift, motionDrift, accessibility, capability, ritualInvitations, timeline } = detail
+  const { ecology, consolidation, phaseDuration, shapeDrift, motionDrift, accessibility, capability, ritualInvitations, timeline } = lookup.detail
 
   const seasonAttr = ecology.season?.season
 

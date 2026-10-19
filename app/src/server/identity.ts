@@ -6,6 +6,8 @@
  * for the process lifetime.
  */
 
+import { isRateLimitResponse } from '@grove/github'
+
 export interface StewardIdentity {
   token: string
   login: string
@@ -61,11 +63,8 @@ export async function resolveStewardIdentity(): Promise<IdentityResolution> {
 
     if (!response.ok) {
       // Only an authentication failure says anything about the token. A
-      // rate limit (429, or 403 with the quota exhausted) and server errors
-      // leave it unverified.
-      const rateLimited =
-        response.status === 429 ||
-        (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
+      // rate limit (primary or secondary) and server errors leave it unverified.
+      const rateLimited = isRateLimitResponse(response.status, response.headers)
       const rejected =
         response.status === 401 || (response.status === 403 && !rateLimited)
       console.warn(

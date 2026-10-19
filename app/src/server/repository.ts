@@ -50,9 +50,20 @@ export interface RepositoryDetail {
   timeline: TimelineEntry[]
 }
 
+/**
+ * What a repository lookup produced. Only `observed` carries detail; the
+ * other kinds say why nothing was observed, without guessing.
+ */
+export type RepositoryLookup =
+  | { kind: 'observed'; detail: RepositoryDetail }
+  /** GitHub reported the repository missing or not accessible with this token (404 / 403) */
+  | { kind: 'not_accessible'; status: number }
+  /** GitHub gave no usable answer: rate limit, server error or network failure */
+  | { kind: 'unavailable'; status?: number }
+
 export const loadRepository = createServerFn({ method: 'GET' })
   .inputValidator((data: { owner: string; name: string }) => data)
-  .handler(async ({ data }): Promise<RepositoryDetail | undefined> => {
+  .handler(async ({ data }): Promise<RepositoryLookup> => {
     const identity = await getStewardIdentity()
 
     if (!identity) {
@@ -62,15 +73,23 @@ export const loadRepository = createServerFn({ method: 'GET' })
     const token = identity.token
 
     const fullName = `${data.owner}/${data.name}`
-    // A repository GitHub reports as missing or not accessible with this
-    // token has no detail to show; anything else is a real failure.
-    const repo = await fetchRepository(token, fullName).catch((err: unknown) => {
-      if (err instanceof GitHubApiError && (err.status === 404 || err.status === 403)) {
-        return undefined
+    let repo: Awaited<ReturnType<typeof fetchRepository>>
+    try {
+      repo = await fetchRepository(token, fullName)
+    } catch (err: unknown) {
+      // A decision about access (404/403 that is not throttling) means there
+      // is nothing to observe; throttling, server errors and network failures
+      // mean GitHub gave no usable answer this time.
+      if (err instanceof GitHubApiError) {
+        if (!err.rateLimited && (err.status === 404 || err.status === 403)) {
+          return { kind: 'not_accessible', status: err.status }
+        }
+        console.warn(`[grove] GitHub gave no usable answer for ${fullName} (${err.status}).`)
+        return { kind: 'unavailable', status: err.status }
       }
-      throw err
-    })
-    if (!repo) return undefined
+      console.warn(`[grove] Failed to reach GitHub for ${fullName}:`, err)
+      return { kind: 'unavailable' }
+    }
 
     // Classify and fetch structural signals in parallel.
     // Entanglement (ecosystemRepoNames) is omitted here: it is a
@@ -170,15 +189,18 @@ export const loadRepository = createServerFn({ method: 'GET' })
     )
 
     return {
-      ecology: enrichedEcology,
-      consolidation,
-      phaseDuration,
-      shapeDrift,
-      motionDrift,
-      accessibility,
-      capability,
-      ritualInvitations,
-      timeline,
+      kind: 'observed',
+      detail: {
+        ecology: enrichedEcology,
+        consolidation,
+        phaseDuration,
+        shapeDrift,
+        motionDrift,
+        accessibility,
+        capability,
+        ritualInvitations,
+        timeline,
+      },
     }
   })
 
