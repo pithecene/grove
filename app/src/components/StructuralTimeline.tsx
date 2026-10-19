@@ -1,7 +1,8 @@
-import type { TimelineEntry } from '../server/timeline'
+import type { HistoryProvenance, TimelineEntry } from '../server/timeline'
 
 interface StructuralTimelineProps {
   timeline: TimelineEntry[]
+  provenance?: HistoryProvenance
 }
 
 const MAX_DISPLAY = 20
@@ -58,8 +59,23 @@ function describeDeclarationChange(change: {
   }
 }
 
-export function StructuralTimeline({ timeline }: StructuralTimelineProps) {
-  if (timeline.length === 0) return null
+/** UTC days, as "Oct 19, 2026" / "Oct 19 and Oct 21, 2026" / "a, b and c". */
+/** Date-only values are UTC days; render them as such in every time zone. */
+const utcDayFormat = new Intl.DateTimeFormat('en-US', {
+  month: 'short',
+  day: 'numeric',
+  year: 'numeric',
+  timeZone: 'UTC',
+})
+
+function formatDays(days: string[]): string {
+  const names = days.map((d) => utcDayFormat.format(new Date(`${d}T00:00:00.000Z`)))
+  if (names.length <= 1) return names.join('')
+  return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
+}
+
+export function StructuralTimeline({ timeline, provenance }: StructuralTimelineProps) {
+  if (timeline.length === 0 && !provenance) return null
 
   const visible = timeline.slice(0, MAX_DISPLAY)
   const hiddenCount = timeline.length - visible.length
@@ -92,6 +108,20 @@ export function StructuralTimeline({ timeline }: StructuralTimelineProps) {
             shown
           </div>
         )}
+
+        {provenance && (
+          <div
+            className="py-2 text-xs"
+            style={{ color: 'var(--grove-text-muted)', opacity: 0.5 }}
+          >
+            {provenance.days} {provenance.days === 1 ? 'day' : 'days'} in this series
+            {provenance.days === 1
+              ? ` (${formatDays([provenance.from])})`
+              : `, ${formatDays([provenance.from])} through ${formatDays([provenance.through])},`}{' '}
+            recorded from the repository&rsquo;s history
+            {provenance.recordedOn.length > 0 ? ` on ${formatDays(provenance.recordedOn)}` : ''}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -109,29 +139,7 @@ function TimelineEntryView({ entry }: { entry: TimelineEntry }) {
       return <ObservationGapView entry={entry} />
     case 'name_change':
       return <NameChangeView entry={entry} />
-    case 'history_span':
-      return <HistorySpanView entry={entry} />
   }
-}
-
-function HistorySpanView({
-  entry,
-}: {
-  entry: Extract<TimelineEntry, { kind: 'history_span' }>
-}) {
-  return (
-    <div>
-      <div
-        className="text-xs"
-        style={{ color: 'var(--grove-text-muted)', opacity: 0.7 }}
-      >
-        Recorded from history as the default branch now records it &mdash;{' '}
-        {formatDate(entry.observedAt)} through {formatDate(entry.spanEnd)} ({entry.days}{' '}
-        {entry.days === 1 ? 'day' : 'days'}
-        {entry.recordedAt ? `, recorded ${formatDate(entry.recordedAt)}` : ''})
-      </div>
-    </div>
-  )
 }
 
 function ObservationGapView({
@@ -146,7 +154,15 @@ function ObservationGapView({
         style={{ color: 'var(--grove-text-muted)', opacity: 0.7 }}
       >
         Not observed &mdash; {formatDate(entry.lastObservedAt)} through{' '}
-        {formatDate(entry.observedAt)} ({entry.days} days without observation)
+        {formatDate(entry.observedAt)} ({entry.days} days without observation
+        {entry.recordedFromHistory
+          ? `; ${entry.recordedFromHistory.days} of them recorded from history${
+              entry.recordedFromHistory.recordedOn.length > 0
+                ? ` on ${formatDays(entry.recordedFromHistory.recordedOn)}`
+                : ''
+            }`
+          : ''}
+        )
       </div>
     </div>
   )
@@ -193,9 +209,7 @@ function DensityTransitionView({
       </div>
       <div className="text-sm" style={{ color: 'var(--grove-text)' }}>
         {isFirst
-          ? entry.method === 'history'
-            ? `Structural character first read from history as ${formatTierName(entry.toTier)}`
-            : `Structural character first observed as ${formatTierName(entry.toTier)}`
+          ? `Structural character first recorded as ${formatTierName(entry.toTier)}`
           : 'Structural character shifted'}
       </div>
       {!isFirst && (
@@ -205,11 +219,6 @@ function DensityTransitionView({
         >
           from {formatTierName(entry.fromTier!)} to{' '}
           {formatTierName(entry.toTier)}
-        </div>
-      )}
-      {entry.method === 'history' && (
-        <div className="text-xs" style={{ opacity: 0.7, color: 'var(--grove-text-muted)' }}>
-          read from history, not observed that day
         </div>
       )}
       {entry.freshlyRecorded && (
@@ -232,14 +241,8 @@ function DensitySpanView({
         className="text-xs"
         style={{ color: 'var(--grove-text-muted)' }}
       >
-        {entry.method === 'history'
-          ? 'Read from history as'
-          : entry.method === 'mixed'
-            ? 'Observed and read from history as'
-            : 'Observed as'}{' '}
-        {formatTierName(entry.tier)} &mdash;{' '}
-        {formatDate(entry.observedAt)} through {formatDate(entry.spanEnd)} (
-        {entry.observationCount} {entry.method === 'history' ? 'days' : 'observations'})
+        {formatTierName(entry.tier)} &mdash; {formatDate(entry.observedAt)} through{' '}
+        {formatDate(entry.spanEnd)} ({entry.days} {entry.days === 1 ? 'day' : 'days'})
       </div>
       {entry.freshlyRecorded && (
         <div className="text-xs" style={{ opacity: 0.5, color: 'var(--grove-text-muted)' }}>
@@ -272,15 +275,6 @@ function DeclarationChangeView({
           {describeDeclarationChange(change)}
         </div>
       ))}
-      {entry.method === 'history' && (
-        <div
-          className="text-xs"
-          style={{ color: 'var(--grove-text-muted)', opacity: 0.7 }}
-        >
-          Declared in repository on {formatDate(entry.observedAt)} &mdash; recorded from history
-          {entry.recordedAt ? ` on ${formatDate(entry.recordedAt)}` : ''}
-        </div>
-      )}
     </div>
   )
 }

@@ -42,8 +42,8 @@ import {
 import { type AccessFailure, accessFailure } from './github-state'
 import { getStewardIdentity } from './identity'
 import { isWithinScope, parseScope } from './scope'
-import type { TimelineEntry } from './timeline'
-import { buildTimeline } from './timeline'
+import type { HistoryProvenance, TimelineEntry } from './timeline'
+import { buildTimeline, historyProvenance } from './timeline'
 
 export interface RepositoryDetail {
   ecology: RepositoryEcology
@@ -55,6 +55,8 @@ export interface RepositoryDetail {
   capability?: CapabilityObservation
   ritualInvitations: RitualInvitation[]
   timeline: TimelineEntry[]
+  /** Present when any day of the series was recorded from the repository's history */
+  historyProvenance?: HistoryProvenance
 }
 
 /**
@@ -216,6 +218,7 @@ export const loadRepository = createServerFn({ method: 'GET' })
       undefined,
       'observed',
     )
+    const historyDays = getHistoryDaysForIdentity(repo.id)
     const timeline = buildTimeline(
       snapshots,
       declarations,
@@ -230,7 +233,7 @@ export const loadRepository = createServerFn({ method: 'GET' })
           declarations: observedDeclarations.slice(0, HISTORY_LIMIT),
           declarationsComplete: observedDeclarations.length <= HISTORY_LIMIT,
         },
-        historyDays: getHistoryDaysForIdentity(repo.id),
+        historyDays,
       },
     )
 
@@ -291,6 +294,7 @@ export const loadRepository = createServerFn({ method: 'GET' })
         capability,
         ritualInvitations,
         timeline,
+        historyProvenance: historyProvenance(historyDays),
       },
     }
   })

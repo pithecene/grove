@@ -199,7 +199,10 @@ function RepositoryDetailPage() {
 
           {/* Right column — structural timeline */}
           <div className="overflow-y-auto">
-            <StructuralTimeline timeline={timeline} />
+            <StructuralTimeline
+              timeline={timeline}
+              provenance={lookup.detail.historyProvenance}
+            />
           </div>
         </div>
       </main>
