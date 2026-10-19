@@ -6,10 +6,13 @@ interface StructuralTimelineProps {
 
 const MAX_DISPLAY = 20
 
+// Days are UTC days throughout Grove (windows, backfill, spans), so every
+// date on the timeline is rendered as its UTC day, in every time zone.
 const dateFormat = new Intl.DateTimeFormat('en-US', {
   month: 'short',
   day: 'numeric',
   year: 'numeric',
+  timeZone: 'UTC',
 })
 
 function formatDate(iso: string): string {
