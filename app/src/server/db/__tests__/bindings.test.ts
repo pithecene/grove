@@ -283,7 +283,7 @@ describe('getPortfolioCalendarWindow', () => {
     expect(slots[2].snapshot?.fullName).toBe('org-old/thing')
   })
 
-  it('falls back to the name when the identity has no bindings yet', () => {
+  it('a known identity with no bindings and no rows of its own is not read by the name', () => {
     seedSnapshot('orchard/alpha', '2025-01-14T12:00:00.000Z')
     const windows = getPortfolioCalendarWindow(
       [{ fullName: 'orchard/alpha', githubId: 100 }],
@@ -291,6 +291,6 @@ describe('getPortfolioCalendarWindow', () => {
       1,
       db,
     )
-    expect(windows.get('orchard/alpha')![0].snapshot).toBeDefined()
+    expect(windows.get('orchard/alpha')?.[0].snapshot).toBeUndefined()
   })
 })

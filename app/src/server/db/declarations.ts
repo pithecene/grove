@@ -1,5 +1,5 @@
 import type { GroveDeclaration } from '@grove/core'
-import { and, desc, eq, gte } from 'drizzle-orm'
+import { and, desc, eq, gte, isNull, or } from 'drizzle-orm'
 
 import { currentSegmentStart, extendBindingForName } from './bindings'
 import type { GroveDb } from './client'
@@ -21,22 +21,41 @@ export function recordDeclarationIfChanged(
   declaration: GroveDeclaration | undefined,
   classified: boolean,
   db: GroveDb = getDb(),
+  githubId?: number,
 ): boolean {
   return db.transaction(() => {
-    // Compare within this identity's segment only: a name taken over by
-    // another repository starts its declaration history afresh, even when
-    // the declaration reads the same.
+    // Compare against this identity's own rows under this name only — by id
+    // and name where recorded, otherwise within the name's current segment —
+    // so a name taken over by another repository starts its declaration
+    // history afresh even when the declaration reads the same, and a
+    // repository observed under a new name records its declaration there.
     const segmentStart = currentSegmentStart(fullName, db)
+    const byName =
+      segmentStart === undefined
+        ? eq(declarationChanges.fullName, fullName)
+        : and(
+            eq(declarationChanges.fullName, fullName),
+            gte(declarationChanges.observedAt, segmentStart),
+          )
     const latest = db
       .select()
       .from(declarationChanges)
       .where(
-        segmentStart === undefined
-          ? eq(declarationChanges.fullName, fullName)
-          : and(
-              eq(declarationChanges.fullName, fullName),
-              gte(declarationChanges.observedAt, segmentStart),
-            ),
+        // Both arms stay inside the current segment: an identity returning
+        // to a name after another held it starts afresh too. With no segment
+        // at all, unbound rows under the name are nobody's yet — only tagged
+        // rows count.
+        githubId === undefined
+          ? byName
+          : segmentStart === undefined
+            ? and(
+                eq(declarationChanges.fullName, fullName),
+                eq(declarationChanges.githubId, githubId),
+              )
+            : and(
+                byName,
+                or(eq(declarationChanges.githubId, githubId), isNull(declarationChanges.githubId)),
+              ),
       )
       .orderBy(desc(declarationChanges.id))
       .limit(1)
@@ -54,6 +73,7 @@ export function recordDeclarationIfChanged(
     db.insert(declarationChanges)
       .values({
         fullName,
+        githubId: githubId ?? null,
         observedAt,
         classified,
         intent: declaration?.intent ?? null,

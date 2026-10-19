@@ -34,7 +34,13 @@ function repo(
   }
 }
 
-function seed(fullName: string, phase: string, count: number, startDay = 1) {
+function seed(
+  fullName: string,
+  phase: string,
+  count: number,
+  startDay = 1,
+  githubId?: number,
+) {
   db.insert(repositories)
     .values({
       fullName,
@@ -48,6 +54,7 @@ function seed(fullName: string, phase: string, count: number, startDay = 1) {
     db.insert(ecologySnapshots)
       .values({
         fullName,
+        githubId: githubId ?? null,
         observedAt: `2025-01-${String(startDay + i).padStart(2, '0')}T12:00:00Z`,
         classified: true,
         phase,
@@ -60,8 +67,8 @@ const activeProposal = () => db.select().from(climateProposals).all()[0]
 
 describe('proposal source membership', () => {
   it('records the repositories a new proposal drew on', () => {
-    seed('org/core-a', 'expanding', 28) // divergent from dormancy across both windows
-    seed('org/app-b', 'resting', 28) // aligned, long-arc domain (not Set A: no split)
+    seed('org/core-a', 'expanding', 28, 1, 100) // divergent from dormancy across both windows
+    seed('org/app-b', 'resting', 28, 1, 200) // aligned, long-arc domain (not Set A: no split)
     const portfolio = [
       repo('org/core-a', 'perennial', 'infrastructure', 'expanding', 100),
       repo('org/app-b', 'perennial', 'application', 'resting', 200),
@@ -88,7 +95,7 @@ describe('proposal source membership', () => {
       [{ fullName: 'org/core-a', githubId: 100 }],
     )
     // core-a is gone from the selected portfolio; core-b is fully observed and aligned.
-    seed('org/core-b', 'resting', 14, 15)
+    seed('org/core-b', 'resting', 14, 15, 200)
     const portfolio = [repo('org/core-b', 'perennial', 'infrastructure', 'resting', 200)]
     const result = evaluatePortfolioProposals('dormancy', portfolio, STEWARD, db, END_DAY)
     expect(result?.evidence).toBe('not_observed')
@@ -110,8 +117,8 @@ describe('proposal source membership', () => {
     )
     // The source is fully observed and aligned now; an unrelated core
     // repository diverges in the same direction the proposal recorded.
-    seed('org/core-a', 'resting', 14, 15)
-    seed('org/core-b', 'expanding', 14, 15)
+    seed('org/core-a', 'resting', 14, 15, 100)
+    seed('org/core-b', 'expanding', 14, 15, 200)
     const portfolio = [
       repo('org/core-a', 'perennial', 'infrastructure', 'resting', 100),
       repo('org/core-b', 'perennial', 'infrastructure', 'expanding', 200),
@@ -134,7 +141,7 @@ describe('proposal source membership', () => {
       db,
       [{ fullName: 'org/core-a', githubId: 100 }],
     )
-    seed('org/core-b', 'expanding', 14, 15)
+    seed('org/core-b', 'expanding', 14, 15, 200)
     const supportedAtCreation = activeProposal().lastSupportedAt
     const portfolio = [repo('org/core-b', 'perennial', 'infrastructure', 'expanding', 200)]
     const result = evaluatePortfolioProposals('dormancy', portfolio, STEWARD, db, END_DAY)
@@ -156,7 +163,7 @@ describe('proposal source membership', () => {
       db,
       [{ fullName: 'org-old/core-a', githubId: 100 }],
     )
-    seed('org/core-a', 'resting', 14, 15) // renamed, fully observed, aligned now
+    seed('org/core-a', 'resting', 14, 15, 100) // renamed, fully observed, aligned now
     const portfolio = [repo('org/core-a', 'perennial', 'infrastructure', 'resting', 100)]
     const result = evaluatePortfolioProposals('dormancy', portfolio, STEWARD, db, END_DAY)
     expect(result).toBeUndefined()
@@ -175,7 +182,7 @@ describe('proposal source membership', () => {
       STEWARD,
       db,
     )
-    seed('org/core-b', 'resting', 14, 15)
+    seed('org/core-b', 'resting', 14, 15, 200)
     const portfolio = [repo('org/core-b', 'perennial', 'infrastructure', 'resting', 200)]
     const result = evaluatePortfolioProposals('dormancy', portfolio, STEWARD, db, END_DAY)
     expect(result).toBeUndefined()

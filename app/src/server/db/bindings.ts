@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gte, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, isNull, lte, ne, or, sql } from 'drizzle-orm'
 
 import type { GroveDb } from './client'
 import { getDb } from './client'
@@ -24,21 +24,46 @@ export type BindingFloorBasis =
   /** the identity's last observation under another name: it holds one name at a time */
   | 'previous_name_observation'
 
+/** Where an identity was last observed under some other name. */
+export interface OtherNameObservation {
+  fullName: string
+  lastObservedAt: string
+}
+
 /**
- * The identity's latest binding under a name other than `fullName` whose
- * observations end before `before`, if any. Rows stored under `fullName` up
- * to that binding's `last_observed_at` cannot be this identity's.
+ * The identity's latest observation under a name other than `fullName`
+ * before `before`, if any — from its binding segments and from rows that
+ * recorded the identity directly (which need no binding to count). Rows
+ * stored under `fullName` up to that instant cannot be this identity's.
  */
 export function lastObservedUnderOtherName(
   githubId: number,
   fullName: string,
   before: string,
   db: GroveDb = getDb(),
-): BindingRow | undefined {
-  return getBindingsForIdentity(githubId, db)
-    .filter((b) => b.fullName !== fullName && b.lastObservedAt < before)
-    .reduce<BindingRow | undefined>(
-      (latest, b) => (!latest || b.lastObservedAt > latest.lastObservedAt ? b : latest),
+): OtherNameObservation | undefined {
+  const candidates: OtherNameObservation[] = getBindingsForIdentity(githubId, db).map((b) => ({
+    fullName: b.fullName,
+    lastObservedAt: b.lastObservedAt,
+  }))
+  for (const table of [ecologySnapshots, declarationChanges] as const) {
+    const tagged = db
+      .select({
+        fullName: table.fullName,
+        lastObservedAt: sql<string | null>`max(${table.observedAt})`,
+      })
+      .from(table)
+      .where(and(eq(table.githubId, githubId), ne(table.fullName, fullName)))
+      .groupBy(table.fullName)
+      .all()
+    for (const row of tagged) {
+      if (row.lastObservedAt) candidates.push({ fullName: row.fullName, lastObservedAt: row.lastObservedAt })
+    }
+  }
+  return candidates
+    .filter((c) => c.fullName !== fullName && c.lastObservedAt < before)
+    .reduce<OtherNameObservation | undefined>(
+      (latest, c) => (!latest || c.lastObservedAt > latest.lastObservedAt ? c : latest),
       undefined,
     )
 }
@@ -404,20 +429,27 @@ export function listResolutions(db: GroveDb = getDb()): ResolutionRow[] {
  * exact instant each segment began.
  */
 function identityPredicate(
+  githubId: number,
   bindings: BindingRow[],
   column: {
     fullName: typeof ecologySnapshots.fullName
     observedAt: typeof ecologySnapshots.observedAt
+    githubId: typeof ecologySnapshots.githubId
   },
 ) {
-  const conditions = bindings.map((b) =>
+  // Rows that recorded their identity are matched by it directly, with or
+  // without bindings; rows recorded before row identity (null) resolve
+  // through the bindings only.
+  const byId = eq(column.githubId, githubId)
+  if (bindings.length === 0) return byId
+  const bySegment = bindings.map((b) =>
     and(
       eq(column.fullName, b.fullName),
       gte(column.observedAt, b.firstObservedAt),
       lte(column.observedAt, b.lastObservedAt),
     ),
   )
-  return or(...conditions)
+  return or(byId, and(isNull(column.githubId), or(...bySegment)))
 }
 
 /**
@@ -431,11 +463,11 @@ export function getSnapshotHistoryForIdentity(
   db: GroveDb = getDb(),
 ) {
   const bindings = getBindingsForIdentity(githubId, db)
-  if (bindings.length === 0) return []
 
-  const predicate = identityPredicate(bindings, {
+  const predicate = identityPredicate(githubId, bindings, {
     fullName: ecologySnapshots.fullName,
     observedAt: ecologySnapshots.observedAt,
+    githubId: ecologySnapshots.githubId,
   })
   const where = options.since
     ? and(predicate, gte(ecologySnapshots.observedAt, options.since))
@@ -459,13 +491,13 @@ export function getDeclarationHistoryForIdentity(
   db: GroveDb = getDb(),
 ) {
   const bindings = getBindingsForIdentity(githubId, db)
-  if (bindings.length === 0) return []
 
   // Declaration rows share the snapshot columns' shape for name/time.
-  const predicate = identityPredicate(bindings, {
+  const predicate = identityPredicate(githubId, bindings, {
     fullName: declarationChanges.fullName as unknown as typeof ecologySnapshots.fullName,
     observedAt:
       declarationChanges.observedAt as unknown as typeof ecologySnapshots.observedAt,
+    githubId: declarationChanges.githubId as unknown as typeof ecologySnapshots.githubId,
   })
 
   return db

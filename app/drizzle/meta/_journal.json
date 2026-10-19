@@ -36,6 +36,13 @@
       "when": 1792359541957,
       "tag": "0004_binding_segments",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792379278391,
+      "tag": "0005_row_identity",
+      "breakpoints": true
     }
   ]
 }

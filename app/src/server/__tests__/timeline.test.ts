@@ -18,6 +18,7 @@ function makeSnapshot(overrides: {
   return {
     id: ++idCounter,
     fullName: overrides.fullName ?? 'owner/repo',
+    githubId: null,
     observedAt: overrides.observedAt,
     classified: true,
     intent: 'test',
@@ -50,6 +51,7 @@ function makeDeclaration(overrides: {
   return {
     id: ++idCounter,
     fullName: overrides.fullName ?? 'owner/repo',
+    githubId: null,
     observedAt: overrides.observedAt,
     classified: overrides.classified ?? true,
     intent: overrides.intent !== undefined ? overrides.intent : 'test',

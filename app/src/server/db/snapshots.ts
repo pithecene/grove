@@ -5,12 +5,11 @@ import type {
   StructuralSignals,
 } from '@grove/core'
 import { buildCalendarWindow, shiftDay } from '@grove/core'
-import { and, desc, eq, gte } from 'drizzle-orm'
+import { and, desc, eq, gte, isNull, or } from 'drizzle-orm'
 
 import {
   currentSegmentStart,
   extendBindingForName,
-  getBindingsForIdentity,
   getSnapshotHistoryForIdentity,
   recordObservedBinding,
 } from './bindings'
@@ -96,8 +95,11 @@ function upsertRepositoryRow(repo: RepositoryRow, now: string, db: GroveDb) {
  * is atomic — prevents duplicate snapshots if the deployment model
  * ever changes from synchronous single-process.
  */
+/** What a snapshot is recorded for: the ecology and, when known, its identity. */
+export type SnapshotSubject = RepositoryEcology & { githubId?: number }
+
 export function recordSnapshot(
-  ecology: RepositoryEcology,
+  ecology: SnapshotSubject,
   signals?: StructuralSignals,
   density?: DensityObservation,
   db: GroveDb = getDb(),
@@ -107,7 +109,7 @@ export function recordSnapshot(
   // better-sqlite3 transactions acquire an EXCLUSIVE lock, so concurrent
   // callers (if any) block until this completes.
   return db.transaction(() => {
-    if (isWithinInterval(ecology.fullName, now, db)) return false
+    if (isWithinInterval(ecology.fullName, now, db, ecology.githubId)) return false
     db.insert(ecologySnapshots)
       .values(buildSnapshotValues(ecology, signals, density, now))
       .run()
@@ -122,7 +124,7 @@ export function recordSnapshot(
  */
 export function recordSnapshotBatch(
   entries: Array<{
-    ecology: RepositoryEcology
+    ecology: SnapshotSubject
     signals?: StructuralSignals
     density?: DensityObservation
   }>,
@@ -131,7 +133,7 @@ export function recordSnapshotBatch(
   const now = new Date()
   db.transaction(() => {
     for (const { ecology, signals, density } of entries) {
-      if (isWithinInterval(ecology.fullName, now, db)) continue
+      if (isWithinInterval(ecology.fullName, now, db, ecology.githubId)) continue
       db.insert(ecologySnapshots)
         .values(buildSnapshotValues(ecology, signals, density, now))
         .run()
@@ -170,20 +172,37 @@ export function getSnapshotHistory(fullName: string, limit = 100, db: GroveDb = 
 
 // ── Internal helpers ──────────────────────────────────────────────
 
-function isWithinInterval(fullName: string, now: Date, db: GroveDb): boolean {
-  // Only this identity's segment throttles: a name just taken over by
-  // another repository has no snapshot of its own yet.
+function isWithinInterval(
+  fullName: string,
+  now: Date,
+  db: GroveDb,
+  githubId?: number,
+): boolean {
+  // Only this identity's own snapshots under this name throttle: rows that
+  // recorded the identity are matched by it and the name; rows without one
+  // only within the name's current segment. A name just taken over by
+  // another repository has no snapshot of its own yet, and a repository
+  // observed under a new name records its first row there.
   const segmentStart = currentSegmentStart(fullName, db)
+  const byName =
+    segmentStart === undefined
+      ? eq(ecologySnapshots.fullName, fullName)
+      : and(eq(ecologySnapshots.fullName, fullName), gte(ecologySnapshots.observedAt, segmentStart))
+  // Both arms stay inside the current segment: an identity returning to a
+  // name after another held it starts afresh too. With no segment at all,
+  // unbound rows under the name are nobody's yet — only tagged rows count.
   const latest = db
     .select({ observedAt: ecologySnapshots.observedAt })
     .from(ecologySnapshots)
     .where(
-      segmentStart === undefined
-        ? eq(ecologySnapshots.fullName, fullName)
-        : and(
-            eq(ecologySnapshots.fullName, fullName),
-            gte(ecologySnapshots.observedAt, segmentStart),
-          ),
+      githubId === undefined
+        ? byName
+        : segmentStart === undefined
+          ? and(eq(ecologySnapshots.fullName, fullName), eq(ecologySnapshots.githubId, githubId))
+          : and(
+              byName,
+              or(eq(ecologySnapshots.githubId, githubId), isNull(ecologySnapshots.githubId)),
+            ),
     )
     .orderBy(desc(ecologySnapshots.observedAt))
     .limit(1)
@@ -195,13 +214,14 @@ function isWithinInterval(fullName: string, now: Date, db: GroveDb): boolean {
 }
 
 function buildSnapshotValues(
-  ecology: RepositoryEcology,
+  ecology: SnapshotSubject,
   signals: StructuralSignals | undefined,
   density: DensityObservation | undefined,
   now: Date,
 ) {
   return {
     fullName: ecology.fullName,
+    githubId: ecology.githubId ?? null,
     observedAt: now.toISOString(),
     classified: ecology.classified,
     intent: ecology.declaration?.intent ?? null,
@@ -298,10 +318,10 @@ export interface WindowSubject {
  * absence therefore yields a window of mostly empty slots instead of a
  * window stitched from whichever days happen to exist.
  *
- * When the subject's identity has bindings, rows are gathered across every
- * name bound to it and only within those bounds — never past them, so a
- * reused name cannot lend another identity's rows. Only an identity with
- * no binding at all falls back to its current name.
+ * When the subject's identity is known, rows are gathered by identity: by
+ * `github_id` where recorded, and across every name bound to it only within
+ * those bounds — never past them, so a reused name cannot lend another
+ * identity's rows. Only a subject with no known identity reads by its name.
  */
 export function getPortfolioCalendarWindow(
   subjects: WindowSubject[],
@@ -314,12 +334,10 @@ export function getPortfolioCalendarWindow(
   const result = new Map<string, CalendarSlot<SnapshotRow>[]>()
 
   for (const subject of subjects) {
-    const bound =
-      subject.githubId !== undefined &&
-      getBindingsForIdentity(subject.githubId, db).length > 0
-    const rows = bound
-      ? getSnapshotHistoryForIdentity(subject.githubId as number, { since }, db)
-      : db
+    const rows =
+      subject.githubId !== undefined
+        ? getSnapshotHistoryForIdentity(subject.githubId, { since }, db)
+        : db
           .select()
           .from(ecologySnapshots)
           .where(

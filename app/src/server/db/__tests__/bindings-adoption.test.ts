@@ -166,6 +166,36 @@ describe('adoption floored by the identity’s own history', () => {
     ])
   })
 
+  it('a tagged observation under another name floors adoption even with no binding for it', () => {
+    for (const month of ['01', '02', '03', '04']) {
+      seedSnapshot('orchard/alpha', `2025-${month}-01T12:00:00.000Z`)
+    }
+    // Identity 100 observed under orchard/beta in mid-March, recorded with
+    // its id but no binding (the state row identity explicitly supports).
+    seedRepo('orchard/beta')
+    db.insert(ecologySnapshots)
+      .values({
+        fullName: 'orchard/beta',
+        githubId: 100,
+        observedAt: '2025-03-15T12:00:00.000Z',
+        classified: true,
+      })
+      .run()
+    recordObservedBinding(
+      100,
+      'orchard/alpha',
+      '2025-05-01T12:00:00.000Z',
+      db,
+      '2024-01-01T00:00:00.000Z',
+    )
+    const alpha = getBindingsForName('orchard/alpha', db)[0]
+    expect(alpha.firstObservedAt).toBe('2025-03-15T12:00:00.000Z')
+    expect(JSON.parse(alpha.evidence ?? '{}')).toMatchObject({
+      floor_basis: 'previous_name_observation',
+      previous_name: 'orchard/beta',
+    })
+  })
+
   it('records the creation time as the basis when nothing stronger is known', () => {
     seedSnapshot('orchard/alpha', '2025-01-01T12:00:00.000Z')
     seedSnapshot('orchard/alpha', '2025-02-01T12:00:00.000Z')

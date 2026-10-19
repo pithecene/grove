@@ -12,6 +12,7 @@ function snapshot(observedAt: string, fullName = 'org/thing'): SnapshotRow {
   return {
     id: ++id,
     fullName,
+    githubId: null,
     observedAt,
     classified: true,
     intent: 'synthetic',
@@ -34,6 +35,7 @@ function declaration(observedAt: string, fullName = 'org/thing'): DeclarationRow
   return {
     id: ++id,
     fullName,
+    githubId: null,
     observedAt,
     classified: true,
     intent: 'synthetic',

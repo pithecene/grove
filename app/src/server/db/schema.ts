@@ -82,6 +82,12 @@ export const ecologySnapshots = sqliteTable(
     fullName: text('full_name')
       .notNull()
       .references(() => repositories.fullName),
+    /**
+     * Identity the row was recorded for, when known at write time. Rows
+     * with an id are matched by it directly; rows recorded before row
+     * identity (null) resolve through `repository_bindings` only.
+     */
+    githubId: integer('github_id'),
     observedAt: text('observed_at').notNull(),
     classified: integer('classified', { mode: 'boolean' }).notNull(),
     // Declaration fields — all nullable (unknown is first-class)
@@ -101,7 +107,10 @@ export const ecologySnapshots = sqliteTable(
     densityTier: text('density_tier'),
     densityDescription: text('density_description'),
   },
-  (table) => [index('idx_snapshots_repo_time').on(table.fullName, table.observedAt)],
+  (table) => [
+    index('idx_snapshots_repo_time').on(table.fullName, table.observedAt),
+    index('idx_snapshots_identity_time').on(table.githubId, table.observedAt),
+  ],
 )
 
 /**
@@ -115,6 +124,8 @@ export const declarationChanges = sqliteTable(
     fullName: text('full_name')
       .notNull()
       .references(() => repositories.fullName),
+    /** Identity the row was recorded for, when known at write time (see ecology_snapshots) */
+    githubId: integer('github_id'),
     observedAt: text('observed_at').notNull(),
     classified: integer('classified', { mode: 'boolean' }).notNull(),
     // Declaration fields — all nullable
@@ -125,7 +136,10 @@ export const declarationChanges = sqliteTable(
     steward: text('steward'),
     consolidationIntervalDays: integer('consolidation_interval_days'),
   },
-  (table) => [index('idx_declarations_repo_time').on(table.fullName, table.observedAt)],
+  (table) => [
+    index('idx_declarations_repo_time').on(table.fullName, table.observedAt),
+    index('idx_declarations_identity_time').on(table.githubId, table.observedAt),
+  ],
 )
 
 /**
