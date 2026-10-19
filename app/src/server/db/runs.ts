@@ -19,9 +19,35 @@ export type RunOutcome = 'observed' | 'unchanged' | 'unavailable' | 'not_recorde
 export type RunRow = typeof collectionRuns.$inferSelect
 export type RunRepositoryRow = typeof collectionRunRepositories.$inferSelect
 
-function serializeScope(scope: PortfolioScope | undefined): string | null {
+/**
+ * The scope as a run records it; `null` when none is configured. Members
+ * are sorted so the same selection serializes the same however the
+ * environment lists it, and a later read matches the run.
+ */
+export function serializeScope(scope: PortfolioScope | undefined): string | null {
   if (!scope) return null
-  return JSON.stringify({ owners: [...scope.owners], exclude: [...scope.exclude] })
+  return JSON.stringify({
+    owners: [...scope.owners].sort(),
+    exclude: [...scope.exclude].sort(),
+  })
+}
+
+/**
+ * Whether a run's recorded scope is the same selection as `scope`, by
+ * members: a run recorded before members were sorted still matches.
+ */
+export function scopeMatches(recorded: string | null, scope: PortfolioScope | undefined): boolean {
+  if (!scope) return recorded === null
+  if (recorded === null) return false
+  let parsed: { owners?: unknown; exclude?: unknown }
+  try {
+    parsed = JSON.parse(recorded)
+  } catch {
+    return false
+  }
+  const same = (a: unknown, b: ReadonlySet<string>) =>
+    Array.isArray(a) && a.length === b.size && a.every((m) => typeof m === 'string' && b.has(m))
+  return same(parsed.owners, scope.owners) && same(parsed.exclude, scope.exclude)
 }
 
 /** Open a run. Returns its id; `finishRun` closes it. */
@@ -110,7 +136,10 @@ export function getRunRepositories(runId: number, db: GroveDb = getDb()): RunRep
 export function getLatestCompleteFullRun(
   stewardId: number,
   db: GroveDb = getDb(),
+  scope?: PortfolioScope,
 ): RunRow | undefined {
+  // Only a run over the same scope can speak for it: a run over another
+  // selection never covered what this one asks about.
   return db
     .select()
     .from(collectionRuns)
@@ -123,6 +152,6 @@ export function getLatestCompleteFullRun(
       ),
     )
     .orderBy(desc(collectionRuns.startedAt), desc(collectionRuns.id))
-    .limit(1)
-    .get()
+    .all()
+    .find((r) => scopeMatches(r.scope, scope))
 }

@@ -39,6 +39,8 @@ export {
   persistProposal,
   withdrawActiveProposal,
 } from './proposal-store'
+export type { ReferenceRow } from './references'
+export { latestReference, listReferences, saveReference } from './references'
 export type { RunMethod, RunOutcome, RunRepositoryRow, RunRow } from './runs'
 export {
   finishRun,
@@ -46,6 +48,8 @@ export {
   getRun,
   getRunRepositories,
   recordRunRepository,
+  scopeMatches,
+  serializeScope,
   startRun,
 } from './runs'
 export type { SnapshotRow, WindowSubject } from './snapshots'

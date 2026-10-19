@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3'
+import { eq } from 'drizzle-orm'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import { createDb, type GroveDb } from '../client'
@@ -10,6 +11,7 @@ import {
   recordRunRepository,
   startRun,
 } from '../runs'
+import { collectionRuns } from '../schema'
 
 let db: GroveDb
 
@@ -83,6 +85,36 @@ describe('collection runs', () => {
 
     expect(getLatestCompleteFullRun(7, db)?.id).toBe(full)
     expect(getLatestCompleteFullRun(9, db)).toBeUndefined()
+  })
+
+  it('the same scope listed in another order matches the run that recorded it', () => {
+    const id = startRun(
+      {
+        method: 'cli',
+        stewardId: 7,
+        fullPortfolio: true,
+        scope: { owners: new Set(['pear', 'orchard']), exclude: new Set(['orchard/b', 'orchard/a']) },
+      },
+      db,
+    )
+    finishRun(id, { complete: true }, db)
+    const reordered = { owners: new Set(['orchard', 'pear']), exclude: new Set(['orchard/a', 'orchard/b']) }
+    expect(getLatestCompleteFullRun(7, db, reordered)?.id).toBe(id)
+  })
+
+  it('a run recorded before members were sorted still matches its scope', () => {
+    const id = startRun(
+      { method: 'cli', stewardId: 7, fullPortfolio: true, startedAt: '2025-01-01T12:00:00.000Z' },
+      db,
+    )
+    finishRun(id, { complete: true }, db)
+    db.update(collectionRuns)
+      .set({ scope: JSON.stringify({ owners: ['z', 'a'], exclude: [] }) })
+      .where(eq(collectionRuns.id, id))
+      .run()
+    expect(getLatestCompleteFullRun(7, db, { owners: new Set(['a', 'z']), exclude: new Set() })?.id).toBe(id)
+    expect(getLatestCompleteFullRun(7, db, { owners: new Set(['a']), exclude: new Set() })).toBeUndefined()
+    expect(getLatestCompleteFullRun(7, db)).toBeUndefined()
   })
 
   it('a run with no scope records none', () => {
