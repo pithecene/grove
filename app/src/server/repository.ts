@@ -23,6 +23,7 @@ import {
   classifyRepository,
   fetchRepository,
   fetchStructuralSignals,
+  GitHubApiError,
 } from '@grove/github'
 import { createServerFn } from '@tanstack/react-start'
 
@@ -34,7 +35,7 @@ import {
   recordSnapshot,
   upsertRepository,
 } from './db'
-import { getStewardIdentity } from './identity'
+import { getStewardIdentity, invalidateStewardIdentity } from './identity'
 import { isWithinScope, parseScope } from './scope'
 import type { TimelineEntry } from './timeline'
 import { buildTimeline } from './timeline'
@@ -51,9 +52,53 @@ export interface RepositoryDetail {
   timeline: TimelineEntry[]
 }
 
+/**
+ * What a repository lookup produced. Only `observed` carries detail; the
+ * other kinds say why nothing was observed, without guessing.
+ */
+export type RepositoryLookup =
+  | { kind: 'observed'; detail: RepositoryDetail }
+  /** GitHub reported the repository missing or not accessible with this token (404 / 403) */
+  | { kind: 'not_accessible'; status: number }
+  /** GitHub gave no usable answer: rate limit, server error or network failure */
+  | { kind: 'unavailable'; status?: number }
+  /** The token was accepted at the session check but refused on this request (401) */
+  | { kind: 'token_rejected' }
+  /** The repository is outside the selected portfolio scope; nothing fetched or recorded */
+  | { kind: 'out_of_scope' }
+
+/**
+ * Map a failed GitHub request to what the page can state. Anything that is
+ * neither a GitHub answer nor a network failure is rethrown: that is a defect,
+ * not a condition to report.
+ */
+function lookupFailure(err: unknown, fullName: string): RepositoryLookup {
+  if (err instanceof GitHubApiError) {
+    if (err.status === 401) {
+      // Revoked or expired since the session check verified it.
+      invalidateStewardIdentity()
+      return { kind: 'token_rejected' }
+    }
+    // A decision about access (404/403 that is not throttling) means there
+    // is nothing to observe; throttling and server errors mean GitHub gave
+    // no usable answer this time.
+    if (!err.rateLimited && (err.status === 404 || err.status === 403)) {
+      return { kind: 'not_accessible', status: err.status }
+    }
+    console.warn(`[grove] GitHub gave no usable answer for ${fullName} (${err.status}).`)
+    return { kind: 'unavailable', status: err.status }
+  }
+  if (err instanceof TypeError) {
+    // fetch rejects with a TypeError when the network fails
+    console.warn(`[grove] Failed to reach GitHub for ${fullName}:`, err)
+    return { kind: 'unavailable' }
+  }
+  throw err
+}
+
 export const loadRepository = createServerFn({ method: 'GET' })
   .validator((data: { owner: string; name: string }) => data)
-  .handler(async ({ data }): Promise<RepositoryDetail | undefined> => {
+  .handler(async ({ data }): Promise<RepositoryLookup> => {
     const identity = await getStewardIdentity()
 
     if (!identity) {
@@ -65,13 +110,18 @@ export const loadRepository = createServerFn({ method: 'GET' })
     const scope = parseScope()
     const fullName = `${data.owner}/${data.name}`
     // Outside the selected scope nothing is fetched or recorded.
-    if (!isWithinScope(fullName, scope)) return undefined
+    if (!isWithinScope(fullName, scope)) return { kind: 'out_of_scope' }
 
-    const repo = await fetchRepository(token, fullName)
+    let repo: Awaited<ReturnType<typeof fetchRepository>>
+    try {
+      repo = await fetchRepository(token, fullName)
+    } catch (err: unknown) {
+      return lookupFailure(err, fullName)
+    }
     // GitHub follows renames/transfers with a redirect: the resolved
     // repository may live outside the scope even when the requested name
     // did not. Nothing about it is classified or recorded in that case.
-    if (!isWithinScope(repo.full_name, scope)) return undefined
+    if (!isWithinScope(repo.full_name, scope)) return { kind: 'out_of_scope' }
 
     // Classify and fetch structural signals in parallel.
     // Entanglement (ecosystemRepoNames) is omitted here: it is a
@@ -80,10 +130,18 @@ export const loadRepository = createServerFn({ method: 'GET' })
     // The entanglement factor is weighted at 0.15 — omitting it may
     // produce a slightly lower tier than the portfolio view in rare
     // cases, but avoids disproportionate API cost for a single-repo view.
-    const [ecology, signals] = await Promise.all([
-      classifyRepository(token, repo),
-      fetchStructuralSignals(token, fullName, repo.default_branch),
-    ])
+    // Reading `.grove.yaml` is a further GitHub request and can fail the
+    // same ways; structural signals already treat partial results as valid.
+    let ecology: Awaited<ReturnType<typeof classifyRepository>>
+    let signals: Awaited<ReturnType<typeof fetchStructuralSignals>>
+    try {
+      ;[ecology, signals] = await Promise.all([
+        classifyRepository(token, repo),
+        fetchStructuralSignals(token, fullName, repo.default_branch),
+      ])
+    } catch (err: unknown) {
+      return lookupFailure(err, fullName)
+    }
 
     // Observe consolidation interval
     const lastActivityDate = repo.pushed_at
@@ -177,15 +235,18 @@ export const loadRepository = createServerFn({ method: 'GET' })
     )
 
     return {
-      ecology: enrichedEcology,
-      consolidation,
-      phaseDuration,
-      shapeDrift,
-      motionDrift,
-      accessibility,
-      capability,
-      ritualInvitations,
-      timeline,
+      kind: 'observed',
+      detail: {
+        ecology: enrichedEcology,
+        consolidation,
+        phaseDuration,
+        shapeDrift,
+        motionDrift,
+        accessibility,
+        capability,
+        ritualInvitations,
+        timeline,
+      },
     }
   })
 
