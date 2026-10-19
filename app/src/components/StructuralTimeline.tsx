@@ -109,7 +109,29 @@ function TimelineEntryView({ entry }: { entry: TimelineEntry }) {
       return <ObservationGapView entry={entry} />
     case 'name_change':
       return <NameChangeView entry={entry} />
+    case 'history_span':
+      return <HistorySpanView entry={entry} />
   }
+}
+
+function HistorySpanView({
+  entry,
+}: {
+  entry: Extract<TimelineEntry, { kind: 'history_span' }>
+}) {
+  return (
+    <div>
+      <div
+        className="text-xs"
+        style={{ color: 'var(--grove-text-muted)', opacity: 0.7 }}
+      >
+        Recorded from history as the default branch now records it &mdash;{' '}
+        {formatDate(entry.observedAt)} through {formatDate(entry.spanEnd)} ({entry.days}{' '}
+        {entry.days === 1 ? 'day' : 'days'}
+        {entry.recordedAt ? `, recorded ${formatDate(entry.recordedAt)}` : ''})
+      </div>
+    </div>
+  )
 }
 
 function ObservationGapView({

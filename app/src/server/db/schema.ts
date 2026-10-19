@@ -89,6 +89,17 @@ export const ecologySnapshots = sqliteTable(
      */
     githubId: integer('github_id'),
     observedAt: text('observed_at').notNull(),
+    /**
+     * How the row came to be: `observed` (GitHub at that moment) or
+     * `history` (reconstructed from the repository's commit history —
+     * the retrospective branch state, never presented as contemporaneous).
+     */
+    method: text('method').notNull().default('observed'),
+    /** When the row was actually written — for `history` rows, the backfill time */
+    recordedAt: text('recorded_at'),
+    collectionRunId: integer('collection_run_id'),
+    /** JSON provenance for `history` rows: sha, committed_at, branch_state, state, algorithm, divergences */
+    evidence: text('evidence'),
     classified: integer('classified', { mode: 'boolean' }).notNull(),
     // Declaration fields — all nullable (unknown is first-class)
     intent: text('intent'),
@@ -127,6 +138,12 @@ export const declarationChanges = sqliteTable(
     /** Identity the row was recorded for, when known at write time (see ecology_snapshots) */
     githubId: integer('github_id'),
     observedAt: text('observed_at').notNull(),
+    /** `observed` | `history` (see ecology_snapshots.method) */
+    method: text('method').notNull().default('observed'),
+    recordedAt: text('recorded_at'),
+    collectionRunId: integer('collection_run_id'),
+    /** JSON provenance for `history` rows: sha, committed_at, path */
+    evidence: text('evidence'),
     classified: integer('classified', { mode: 'boolean' }).notNull(),
     // Declaration fields — all nullable
     intent: text('intent'),

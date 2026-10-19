@@ -52,6 +52,18 @@ export type TimelineEntry =
       toName: string
       lastSeenUnderPrevious: string
     }
+  | {
+      /**
+       * Consecutive days whose rows were recorded from the repository's
+       * commit history (the retrospective branch state), not observed.
+       * `observedAt` is the first such day, `spanEnd` the last.
+       */
+      kind: 'history_span'
+      observedAt: string
+      spanEnd: string
+      days: number
+      recordedAt: string | null
+    }
 
 export interface TimelineIdentity {
   /** Bindings of the identity, any order */
@@ -97,6 +109,7 @@ export function buildTimeline(
     declarationsComplete,
   })
   const nameEntries = identity ? buildNameChangeEntries(identity.bindings) : []
+  const historyEntries = buildHistorySpanEntries(snapshotsDesc)
 
   // Merge chronologically DESC (most recent first). On equal timestamps a
   // gap sorts after (older than) the observation that ended it.
@@ -105,6 +118,7 @@ export function buildTimeline(
     ...declarationEntries,
     ...gapEntries,
     ...nameEntries,
+    ...historyEntries,
   ].sort((a, b) => {
     const byTime = b.observedAt.localeCompare(a.observedAt)
     if (byTime !== 0) return byTime
@@ -153,18 +167,22 @@ export function buildGapEntries(
   declarationsDesc: DeclarationRow[] = [],
   bounds: GapBounds = {},
 ): TimelineEntry[] {
+  // Only contemporaneous observations bound a span: a row recorded from
+  // history says what the repository was, not that Grove looked.
+  const observedSnapshots = snapshotsDesc.filter((s) => s.method !== 'history')
+  const observedDeclarations = declarationsDesc.filter((d) => d.method !== 'history')
   const edges: string[] = []
-  if (bounds.snapshotsComplete === false && snapshotsDesc.length > 0) {
-    edges.push(snapshotsDesc[snapshotsDesc.length - 1].observedAt)
+  if (bounds.snapshotsComplete === false && observedSnapshots.length > 0) {
+    edges.push(observedSnapshots[observedSnapshots.length - 1].observedAt)
   }
-  if (bounds.declarationsComplete === false && declarationsDesc.length > 0) {
-    edges.push(declarationsDesc[declarationsDesc.length - 1].observedAt)
+  if (bounds.declarationsComplete === false && observedDeclarations.length > 0) {
+    edges.push(observedDeclarations[observedDeclarations.length - 1].observedAt)
   }
   const edge = edges.length > 0 ? edges.reduce((a, b) => (a > b ? a : b)) : undefined
   const instants = [
     ...new Set([
-      ...snapshotsDesc.map((s) => s.observedAt),
-      ...declarationsDesc.map((d) => d.observedAt),
+      ...observedSnapshots.map((s) => s.observedAt),
+      ...observedDeclarations.map((d) => d.observedAt),
     ]),
   ]
     .filter((t) => edge === undefined || t >= edge)
@@ -184,6 +202,50 @@ export function buildGapEntries(
       })
     }
   }
+  return entries
+}
+
+// ── Spans recorded from history ───────────────────────────────────
+
+/**
+ * One entry per run of consecutive UTC days whose snapshot was recorded
+ * from the repository's commit history. Presented beside — never in place
+ * of — the spans without observation.
+ */
+export function buildHistorySpanEntries(snapshotsDesc: SnapshotRow[]): TimelineEntry[] {
+  const asc = snapshotsDesc
+    .filter((s) => s.method === 'history')
+    .map((s) => ({ day: s.observedAt.slice(0, 10), row: s }))
+    .sort((a, b) => a.day.localeCompare(b.day))
+  const entries: TimelineEntry[] = []
+  let start: (typeof asc)[number] | undefined
+  let last: (typeof asc)[number] | undefined
+  let days = 0
+  const flush = () => {
+    if (start && last) {
+      entries.push({
+        kind: 'history_span',
+        observedAt: start.row.observedAt,
+        spanEnd: last.row.observedAt,
+        days,
+        recordedAt: last.row.recordedAt,
+      })
+    }
+  }
+  for (const item of asc) {
+    if (last && item.day === last.day) continue
+    const consecutive =
+      last !== undefined &&
+      new Date(item.day).getTime() - new Date(last.day).getTime() === MS_PER_DAY
+    if (!consecutive) {
+      flush()
+      start = item
+      days = 0
+    }
+    last = item
+    days++
+  }
+  flush()
   return entries
 }
 
