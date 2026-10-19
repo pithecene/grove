@@ -1,4 +1,4 @@
-import type { RepositoryResolution } from '@grove/github'
+import type { GitHubAnswer, GitHubRepo } from '@grove/github'
 import Database from 'better-sqlite3'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -90,10 +90,10 @@ describe('overlapping segments are refused', () => {
   })
 
   it('the backfill reports the conflict and writes nothing', async () => {
-    const resolver = async (): Promise<RepositoryResolution> => ({
-      outcome: 'resolved',
+    const resolver = async (): Promise<GitHubAnswer<GitHubRepo>> => ({
+      kind: 'ok',
       status: 200,
-      repo: {
+      value: {
         id: 200,
         full_name: 'orchard/alpha',
         html_url: 'https://github.com/orchard/alpha',

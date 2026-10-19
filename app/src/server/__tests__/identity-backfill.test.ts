@@ -1,4 +1,4 @@
-import type { RepositoryResolution } from '@grove/github'
+import type { GitHubAnswer, GitHubRepo } from '@grove/github'
 import Database from 'better-sqlite3'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { getBindingsForIdentity, getResolution, listResolutions } from '../db/bindings'
@@ -32,11 +32,11 @@ function resolved(
   id: number,
   fullName: string,
   createdAt?: string,
-): RepositoryResolution {
+): GitHubAnswer<GitHubRepo> {
   return {
-    outcome: 'resolved',
+    kind: 'ok',
     status: 200,
-    repo: {
+    value: {
       id,
       full_name: fullName,
       html_url: `https://github.com/${fullName}`,
@@ -47,17 +47,17 @@ function resolved(
   }
 }
 
-const table: Record<string, RepositoryResolution> = {
+const table: Record<string, GitHubAnswer<GitHubRepo>> = {
   'person/thing': resolved(100, 'org/thing', '2024-01-01T00:00:00.000Z'),
   'org-old/thing': resolved(100, 'org/thing', '2024-01-01T00:00:00.000Z'),
   'org/thing': resolved(100, 'org/thing', '2024-01-01T00:00:00.000Z'),
-  'someone/gone': { outcome: 'not_found', status: 404 },
-  'someone/locked': { outcome: 'forbidden', status: 403 },
+  'someone/gone': { kind: 'not_found', status: 404 },
+  'someone/locked': { kind: 'forbidden', status: 403 },
   'orchard/reused': resolved(300, 'orchard/reused', '2025-01-10T00:00:00.000Z'),
 }
 
 const resolver: NameResolver = async (name) =>
-  table[name] ?? { outcome: 'error', status: 500, message: 'synthetic' }
+  table[name] ?? { kind: 'unavailable', status: 500 }
 
 const clock = () => '2025-02-01T00:00:00.000Z'
 

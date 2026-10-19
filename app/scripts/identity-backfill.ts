@@ -9,7 +9,7 @@
  */
 import { resolve } from 'node:path'
 
-import { resolveRepositoryByName } from '@grove/github'
+import { fetchRepository } from '@grove/github'
 
 import { getDb } from '../src/server/db'
 import { backfillIdentities } from '../src/server/identity-backfill'
@@ -36,7 +36,7 @@ console.log(
 const db = getDb()
 const report = await backfillIdentities(
   db,
-  (name) => resolveRepositoryByName(token, name),
+  (name) => fetchRepository(token, name),
   { apply, scope },
 )
 

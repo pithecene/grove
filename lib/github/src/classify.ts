@@ -2,23 +2,27 @@ import { deriveSeason, parseGroveYaml } from '@grove/core'
 import type { RepositoryEcology } from '@grove/core'
 
 import { fetchGroveYaml } from './client'
-import type { GitHubRepo } from './types'
+import type { GitHubAnswer, GitHubRepo } from './types'
 
 /**
  * Classify a single repository by fetching and parsing its .grove.yaml.
- * Invalid or missing YAML results in an unclassified ecology (graceful degradation).
+ * A missing or invalid file is an unclassified ecology (an observation);
+ * a request GitHub did not answer with the file's presence or absence is
+ * passed through as that answer — it is not an observation of anything.
  */
 export async function classifyRepository(
   token: string,
   repo: GitHubRepo,
-): Promise<RepositoryEcology> {
-  const raw = await fetchGroveYaml(token, repo.full_name, repo.default_branch)
+): Promise<GitHubAnswer<RepositoryEcology>> {
+  const answer = await fetchGroveYaml(token, repo.full_name, repo.default_branch)
+  if (answer.kind !== 'ok') return answer
 
+  const raw = answer.value
   if (!raw) {
     return {
-      fullName: repo.full_name,
-      htmlUrl: repo.html_url,
-      classified: false,
+      kind: 'ok',
+      status: answer.status,
+      value: { fullName: repo.full_name, htmlUrl: repo.html_url, classified: false },
     }
   }
 
@@ -26,19 +30,23 @@ export async function classifyRepository(
 
   if (!result.ok) {
     return {
-      fullName: repo.full_name,
-      htmlUrl: repo.html_url,
-      classified: false,
+      kind: 'ok',
+      status: answer.status,
+      value: { fullName: repo.full_name, htmlUrl: repo.html_url, classified: false },
     }
   }
 
   const season = deriveSeason(result.declaration.phase)
 
   return {
-    fullName: repo.full_name,
-    htmlUrl: repo.html_url,
-    declaration: result.declaration,
-    season,
-    classified: true,
+    kind: 'ok',
+    status: answer.status,
+    value: {
+      fullName: repo.full_name,
+      htmlUrl: repo.html_url,
+      declaration: result.declaration,
+      season,
+      classified: true,
+    },
   }
 }

@@ -7,6 +7,7 @@ import { DensityDisplay } from '../components/DensityDisplay'
 import { DriftDisplay } from '../components/DriftDisplay'
 import { EmptyState } from '../components/EmptyState'
 import { Header } from '../components/Header'
+import { LookupNotice } from '../components/LookupNotice'
 import { StructuralTimeline } from '../components/StructuralTimeline'
 import { PhaseIndicator } from '../components/PhaseIndicator'
 import { RitualInvitation } from '../components/RitualInvitation'
@@ -54,27 +55,7 @@ function RepositoryDetailPage() {
   }
 
   if (lookup.kind !== 'observed') {
-    return (
-      <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
-        <Header login={session.login} />
-        <main className="px-8 py-8">
-          <Link
-            to="/"
-            className="text-sm mb-6 inline-block"
-            style={{ color: 'var(--grove-text-muted)' }}
-          >
-            &larr; Portfolio
-          </Link>
-          <p className="text-sm" style={{ color: 'var(--grove-text-muted)' }}>
-            {lookup.kind === 'out_of_scope'
-              ? 'This repository is outside the selected portfolio scope.'
-              : lookup.kind === 'not_accessible'
-                ? 'This repository was not found or is not accessible with the configured token.'
-                : 'GitHub gave no usable answer for this repository this time (unreachable, unavailable or rate-limited). Nothing was observed.'}
-          </p>
-        </main>
-      </div>
-    )
+    return <LookupNotice login={session.login} subject="repository" state={lookup} />
   }
 
   const { ecology, consolidation, phaseDuration, shapeDrift, motionDrift, accessibility, capability, ritualInvitations, timeline } = lookup.detail
