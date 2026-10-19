@@ -459,7 +459,7 @@ function identityPredicate(
  */
 export function getSnapshotHistoryForIdentity(
   githubId: number,
-  options: { limit?: number; since?: string } = {},
+  options: { limit?: number; since?: string; method?: 'observed' | 'history' } = {},
   db: GroveDb = getDb(),
 ) {
   const bindings = getBindingsForIdentity(githubId, db)
@@ -469,9 +469,11 @@ export function getSnapshotHistoryForIdentity(
     observedAt: ecologySnapshots.observedAt,
     githubId: ecologySnapshots.githubId,
   })
-  const where = options.since
-    ? and(predicate, gte(ecologySnapshots.observedAt, options.since))
-    : predicate
+  const where = and(
+    predicate,
+    options.since ? gte(ecologySnapshots.observedAt, options.since) : undefined,
+    options.method ? eq(ecologySnapshots.method, options.method) : undefined,
+  )
 
   const query = db
     .select()
@@ -482,6 +484,29 @@ export function getSnapshotHistoryForIdentity(
 }
 
 /**
+ * Every day an identity has a snapshot recorded from history, most recent
+ * first — dates and recording times only, so a long reconstructed span can
+ * be presented without fetching its rows.
+ */
+export function getHistoryDaysForIdentity(
+  githubId: number,
+  db: GroveDb = getDb(),
+): Array<{ observedAt: string; recordedAt: string | null }> {
+  const bindings = getBindingsForIdentity(githubId, db)
+  const predicate = identityPredicate(githubId, bindings, {
+    fullName: ecologySnapshots.fullName,
+    observedAt: ecologySnapshots.observedAt,
+    githubId: ecologySnapshots.githubId,
+  })
+  return db
+    .select({ observedAt: ecologySnapshots.observedAt, recordedAt: ecologySnapshots.recordedAt })
+    .from(ecologySnapshots)
+    .where(and(predicate, eq(ecologySnapshots.method, 'history')))
+    .orderBy(desc(ecologySnapshots.observedAt))
+    .all()
+}
+
+/**
  * Declaration-change history of an identity across every name it was
  * bound to, most recent first. Returns [] when the identity has no bindings.
  */
@@ -489,6 +514,7 @@ export function getDeclarationHistoryForIdentity(
   githubId: number,
   limit = 100,
   db: GroveDb = getDb(),
+  method?: 'observed' | 'history',
 ) {
   const bindings = getBindingsForIdentity(githubId, db)
 
@@ -503,7 +529,7 @@ export function getDeclarationHistoryForIdentity(
   return db
     .select()
     .from(declarationChanges)
-    .where(predicate)
+    .where(and(predicate, method ? eq(declarationChanges.method, method) : undefined))
     .orderBy(desc(declarationChanges.observedAt), desc(declarationChanges.id))
     .limit(limit)
     .all()

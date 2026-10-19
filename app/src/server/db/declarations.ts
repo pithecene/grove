@@ -57,7 +57,7 @@ export function recordDeclarationIfChanged(
                 or(eq(declarationChanges.githubId, githubId), isNull(declarationChanges.githubId)),
               ),
       )
-      .orderBy(desc(declarationChanges.id))
+      .orderBy(desc(declarationChanges.observedAt), desc(declarationChanges.id))
       .limit(1)
       .get()
 
@@ -99,7 +99,7 @@ export function getLatestDeclaration(fullName: string, db: GroveDb = getDb()) {
       .select()
       .from(declarationChanges)
       .where(eq(declarationChanges.fullName, fullName))
-      .orderBy(desc(declarationChanges.id))
+      .orderBy(desc(declarationChanges.observedAt), desc(declarationChanges.id))
       .limit(1)
       .get() ?? null
   )
@@ -117,7 +117,7 @@ export function getDeclarationHistory(
     .select()
     .from(declarationChanges)
     .where(eq(declarationChanges.fullName, fullName))
-    .orderBy(desc(declarationChanges.id))
+    .orderBy(desc(declarationChanges.observedAt), desc(declarationChanges.id))
     .limit(limit)
     .all()
 }

@@ -78,20 +78,25 @@ export function shiftDay(day: string, deltaDays: number): string {
  * Every day gets exactly one slot. A day with no observation carries
  * `snapshot: undefined` — a missing observation is represented explicitly
  * and is never filled from a neighbouring day. When several snapshots fall
- * on the same day, the most recent is kept.
+ * on the same day, a contemporaneous observation is preferred over one
+ * reconstructed from history (`method: 'history'`), then the most recent.
  */
-export function buildCalendarWindow<T extends { observedAt: string }>(
+export function buildCalendarWindow<T extends { observedAt: string; method?: string }>(
   snapshots: ReadonlyArray<T>,
   endDay: string,
   size = PERSISTENCE_WINDOW_SIZE,
 ): CalendarSlot<T>[] {
+  const reconstructed = (s: T) => s.method === 'history'
   const byDay = new Map<string, T>()
   for (const snapshot of snapshots) {
     const day = toUtcDay(snapshot.observedAt)
     const existing = byDay.get(day)
-    if (!existing || existing.observedAt < snapshot.observedAt) {
-      byDay.set(day, snapshot)
-    }
+    const preferred =
+      !existing ||
+      (reconstructed(existing) && !reconstructed(snapshot)) ||
+      (reconstructed(existing) === reconstructed(snapshot) &&
+        existing.observedAt < snapshot.observedAt)
+    if (preferred) byDay.set(day, snapshot)
   }
 
   const slots: CalendarSlot<T>[] = []

@@ -58,10 +58,36 @@ function buildContexts(
   return classified
     .map((repo) => {
       const slots = windows.get(repo.fullName) ?? []
-      const persistence = assessPersistence(relateCalendarWindow(slots, climate))
+      const assessed = assessPersistence(relateCalendarWindow(slots, climate))
+      // A stratum is derived from role and horizon. A window whose rows do
+      // not agree on them (a declaration moved inside it) is undeterminable:
+      // persistence is not attributed to a stratum the repository did not
+      // hold throughout. Phase differences are the relation itself.
+      const persistence = strataAgree(slots, repo)
+        ? assessed
+        : {
+            ...assessed,
+            evidence: 'insufficient' as const,
+            persistentlyAligned: false,
+            persistentlyDivergent: false,
+          }
       return buildRepoPersistenceContext(repo, persistence, climate)
     })
     .filter((ctx): ctx is NonNullable<typeof ctx> => ctx !== undefined)
+}
+
+/**
+ * Whether every observed row in the window declares the role and horizon
+ * the repository declares now — the stratum its persistence is attributed
+ * to. A row with another value, or none, breaks the agreement.
+ */
+function strataAgree(slots: CalendarSlot<SnapshotRow>[], repo: TriggerSubject): boolean {
+  const role = repo.declaration?.role ?? null
+  const horizon = repo.declaration?.horizon ?? null
+  return slots.every(
+    (slot) =>
+      !slot.snapshot || (slot.snapshot.role === role && slot.snapshot.horizon === horizon),
+  )
 }
 
 /** True when at least one window carries enough determinate observations to be examined. */

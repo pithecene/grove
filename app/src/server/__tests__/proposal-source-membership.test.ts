@@ -34,6 +34,15 @@ function repo(
   }
 }
 
+const roleOf = (fullName: string) =>
+  fullName.includes('core')
+    ? 'infrastructure'
+    : fullName.includes('app')
+      ? 'application'
+      : fullName.includes('lib')
+        ? 'library'
+        : 'documentation'
+
 function seed(
   fullName: string,
   phase: string,
@@ -58,6 +67,9 @@ function seed(
         observedAt: `2025-01-${String(startDay + i).padStart(2, '0')}T12:00:00Z`,
         classified: true,
         phase,
+        // Rows carry the stratum the subject declares (role by name, as the subjects do).
+        horizon: 'perennial',
+        role: roleOf(fullName),
       })
       .run()
   }

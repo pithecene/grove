@@ -1,0 +1,1 @@
+ALTER TABLE `repositories` ADD `created_at` text;

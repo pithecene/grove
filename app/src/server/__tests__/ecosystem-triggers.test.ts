@@ -71,6 +71,13 @@ function seedSnapshots(fullName: string, phase: string, count: number, startDay 
         observedAt: `${dayOf(startDay + i)}T12:00:00Z`,
         classified: true,
         phase,
+        // Rows carry the stratum the subject declares (role by name, as the subjects do).
+        horizon: 'perennial',
+        role: fullName.includes('core')
+          ? 'infrastructure'
+          : fullName.includes('app')
+            ? 'application'
+            : 'library',
       })
       .run()
   }
@@ -160,6 +167,8 @@ describe('evaluatePortfolioEcosystemTriggers', () => {
         observedAt: '2025-07-01T12:00:00Z',
         classified: true,
         phase: 'expanding',
+        horizon: 'perennial',
+        role: 'infrastructure',
       })
       .run()
     // 14 rows exist, but only one falls inside the window ending 2025-07-01

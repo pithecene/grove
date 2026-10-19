@@ -6,5 +6,11 @@ export {
   fetchUserRepos,
   fetchViewer,
 } from './client'
-export { fetchStructuralSignals } from './signals'
+export {
+  classifyTree,
+  countEcosystemDependencies,
+  fetchStructuralSignals,
+  type TreeEntry,
+  type TreeSignals,
+} from './signals'
 export type { GitHubAnswer, GitHubFailure, GitHubRepo, GitHubViewer } from './types'
