@@ -10,7 +10,6 @@ import { and, desc, eq, gte, isNull, or } from 'drizzle-orm'
 import {
   currentSegmentStart,
   extendBindingForName,
-  getBindingsForIdentity,
   getSnapshotHistoryForIdentity,
   recordObservedBinding,
 } from './bindings'
@@ -189,16 +188,21 @@ function isWithinInterval(
     segmentStart === undefined
       ? eq(ecologySnapshots.fullName, fullName)
       : and(eq(ecologySnapshots.fullName, fullName), gte(ecologySnapshots.observedAt, segmentStart))
+  // Both arms stay inside the current segment: an identity returning to a
+  // name after another held it starts afresh too. With no segment at all,
+  // unbound rows under the name are nobody's yet — only tagged rows count.
   const latest = db
     .select({ observedAt: ecologySnapshots.observedAt })
     .from(ecologySnapshots)
     .where(
       githubId === undefined
         ? byName
-        : or(
-            and(eq(ecologySnapshots.githubId, githubId), eq(ecologySnapshots.fullName, fullName)),
-            and(isNull(ecologySnapshots.githubId), byName),
-          ),
+        : segmentStart === undefined
+          ? and(eq(ecologySnapshots.fullName, fullName), eq(ecologySnapshots.githubId, githubId))
+          : and(
+              byName,
+              or(eq(ecologySnapshots.githubId, githubId), isNull(ecologySnapshots.githubId)),
+            ),
     )
     .orderBy(desc(ecologySnapshots.observedAt))
     .limit(1)
@@ -314,10 +318,10 @@ export interface WindowSubject {
  * absence therefore yields a window of mostly empty slots instead of a
  * window stitched from whichever days happen to exist.
  *
- * When the subject's identity has bindings, rows are gathered across every
- * name bound to it and only within those bounds — never past them, so a
- * reused name cannot lend another identity's rows. Only an identity with
- * no binding at all falls back to its current name.
+ * When the subject's identity is known, rows are gathered by identity: by
+ * `github_id` where recorded, and across every name bound to it only within
+ * those bounds — never past them, so a reused name cannot lend another
+ * identity's rows. Only a subject with no known identity reads by its name.
  */
 export function getPortfolioCalendarWindow(
   subjects: WindowSubject[],
@@ -330,12 +334,10 @@ export function getPortfolioCalendarWindow(
   const result = new Map<string, CalendarSlot<SnapshotRow>[]>()
 
   for (const subject of subjects) {
-    const bound =
-      subject.githubId !== undefined &&
-      getBindingsForIdentity(subject.githubId, db).length > 0
-    const rows = bound
-      ? getSnapshotHistoryForIdentity(subject.githubId as number, { since }, db)
-      : db
+    const rows =
+      subject.githubId !== undefined
+        ? getSnapshotHistoryForIdentity(subject.githubId, { since }, db)
+        : db
           .select()
           .from(ecologySnapshots)
           .where(

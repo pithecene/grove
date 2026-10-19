@@ -58,6 +58,30 @@ describe('rows recorded with their identity', () => {
     expect(getSnapshotHistoryForIdentity(100, {}, db)).toHaveLength(1)
   })
 
+  it('rows tagged with an identity are readable with no binding at all', () => {
+    db.insert(repositories)
+      .values({
+        fullName: NAME,
+        htmlUrl: `https://github.com/${NAME}`,
+        defaultBranch: 'main',
+        lastObservedAt: '2025-01-01T00:00:00.000Z',
+      })
+      .run()
+    db.insert(ecologySnapshots)
+      .values({ fullName: NAME, githubId: 100, observedAt: '2025-01-14T12:00:00.000Z', classified: true })
+      .run()
+    db.insert(declarationChanges)
+      .values({ fullName: NAME, githubId: 100, observedAt: '2025-01-14T12:00:00.000Z', classified: true })
+      .run()
+    expect(getBindingsForIdentity(100, db)).toHaveLength(0)
+    expect(getSnapshotHistoryForIdentity(100, {}, db)).toHaveLength(1)
+    expect(getDeclarationHistoryForIdentity(100, 10, db)).toHaveLength(1)
+    const windows = getPortfolioCalendarWindow([{ fullName: NAME, githubId: 100 }], '2025-01-14', 1, db)
+    expect(windows.get(NAME)?.[0].snapshot?.githubId).toBe(100)
+    // and another identity asking about the same name gets nothing
+    expect(getSnapshotHistoryForIdentity(200, {}, db)).toHaveLength(0)
+  })
+
   it('a reused name never lends rows across identities, with or without bindings', () => {
     observeAs(100)
     recordSnapshot({ ...ecology, githubId: 100 }, undefined, undefined, db)
@@ -102,6 +126,41 @@ describe('rows recorded with their identity', () => {
       renamed,
       NAME,
     ])
+  })
+
+  it('an identity returning to a name another held in between starts afresh within the hour', () => {
+    observeAs(100)
+    expect(recordSnapshot({ ...ecology, githubId: 100 }, undefined, undefined, db)).toBe(true)
+    expect(recordDeclarationIfChanged(NAME, declaration, true, db, 100)).toBe(true)
+    observeAs(200)
+    expect(recordSnapshot({ ...ecology, githubId: 200 }, undefined, undefined, db)).toBe(true)
+    observeAs(100) // back to 100: a new segment for the name
+    expect(recordSnapshot({ ...ecology, githubId: 100 }, undefined, undefined, db)).toBe(true)
+    expect(recordDeclarationIfChanged(NAME, declaration, true, db, 100)).toBe(true)
+    expect(getBindingsForIdentity(100, db)).toHaveLength(2)
+    expect(getSnapshotHistoryForIdentity(100, {}, db)).toHaveLength(2)
+  })
+
+  it('an unbound historical row under the name never throttles or dedupes a known identity with no segment', () => {
+    db.insert(repositories)
+      .values({
+        fullName: NAME,
+        htmlUrl: `https://github.com/${NAME}`,
+        defaultBranch: 'main',
+        lastObservedAt: '2025-01-01T00:00:00.000Z',
+      })
+      .run()
+    const justNow = new Date(Date.now() - 60 * 1000).toISOString()
+    db.insert(ecologySnapshots)
+      .values({ fullName: NAME, observedAt: justNow, classified: true })
+      .run()
+    db.insert(declarationChanges)
+      .values({ fullName: NAME, observedAt: justNow, classified: true, intent: 'synthetic', phase: 'consolidating' })
+      .run()
+    // No binding for the name: the identity is recorded directly.
+    expect(getBindingsForIdentity(100, db)).toHaveLength(0)
+    expect(recordSnapshot({ ...ecology, githubId: 100 }, undefined, undefined, db)).toBe(true)
+    expect(recordDeclarationIfChanged(NAME, declaration, true, db, 100)).toBe(true)
   })
 
   it('historical rows without an id still resolve through bindings alongside id rows', () => {

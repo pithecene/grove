@@ -14,10 +14,15 @@ Identity is attached to names through **bindings** — time-bound segments
 
 ## 2. The invariant
 
-> A row stored under name *N* at instant *t* belongs to identity *I* if and only if a binding
-> segment of *I* for *N* contains *t* (bounds inclusive, exact timestamps).
+> A row that recorded its identity (`github_id = I`) belongs to *I*, whatever name it was stored
+> under and whether or not any binding covers it.
+>
+> A row that did not (`github_id IS NULL` — recorded before row identity) stored under name *N*
+> at instant *t* belongs to identity *I* if and only if a binding segment of *I* for *N* contains
+> *t* (bounds inclusive, exact timestamps).
 
-Everything else follows from it:
+Bindings are therefore the resolution rule for history recorded before identity was written on
+rows, and the record of which names an identity held when. Everything else follows:
 
 1. **One name at a time.** An identity is never bound to two names over overlapping instants.
    Therefore the latest observation of *I* under any other name is a hard floor for a segment
@@ -33,9 +38,9 @@ Everything else follows from it:
    adoption (§3). Rows later than the latest observation are never pulled in: they belong to
    whatever the name denotes at their own time.
 5. **Rows recorded from now on carry their identity.** New snapshot and declaration rows record
-   `github_id` at write time where it is known; they are matched by id directly and never depend
-   on a binding. Historical rows (`github_id IS NULL`) resolve only through bindings. (Planned:
-   migration `0005_row_identity`.)
+   `github_id` at write time where it is known (migration `0005_row_identity`); they are matched
+   by id directly and never depend on a binding. Historical rows (`github_id IS NULL`) resolve
+   only through bindings. A subject whose identity is known is never read by its name alone.
 
 ## 3. Attributing rows that predate identity tracking (adoption)
 

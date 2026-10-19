@@ -41,15 +41,21 @@ export function recordDeclarationIfChanged(
       .select()
       .from(declarationChanges)
       .where(
+        // Both arms stay inside the current segment: an identity returning
+        // to a name after another held it starts afresh too. With no segment
+        // at all, unbound rows under the name are nobody's yet — only tagged
+        // rows count.
         githubId === undefined
           ? byName
-          : or(
-              and(
-                eq(declarationChanges.githubId, githubId),
+          : segmentStart === undefined
+            ? and(
                 eq(declarationChanges.fullName, fullName),
+                eq(declarationChanges.githubId, githubId),
+              )
+            : and(
+                byName,
+                or(eq(declarationChanges.githubId, githubId), isNull(declarationChanges.githubId)),
               ),
-              and(isNull(declarationChanges.githubId), byName),
-            ),
       )
       .orderBy(desc(declarationChanges.id))
       .limit(1)

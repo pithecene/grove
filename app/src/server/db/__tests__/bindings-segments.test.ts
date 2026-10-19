@@ -120,7 +120,7 @@ describe('calendar windows never read past an identity’s bindings', () => {
     expect(observed).toHaveLength(0)
   })
 
-  it('falls back to the name only for an identity with no binding at all', () => {
+  it('a known identity with neither bindings nor rows of its own is not lent the name’s rows', () => {
     seedSnapshot('orchard/alpha', '2025-01-14T12:00:00.000Z')
     const windows = getPortfolioCalendarWindow(
       [{ fullName: 'orchard/alpha', githubId: 300 }],
@@ -128,6 +128,12 @@ describe('calendar windows never read past an identity’s bindings', () => {
       1,
       db,
     )
-    expect(windows.get('orchard/alpha')![0].snapshot).toBeDefined()
+    expect(windows.get('orchard/alpha')?.[0].snapshot).toBeUndefined()
+  })
+
+  it('reads by the name only when no identity is known', () => {
+    seedSnapshot('orchard/alpha', '2025-01-14T12:00:00.000Z')
+    const windows = getPortfolioCalendarWindow([{ fullName: 'orchard/alpha' }], '2025-01-14', 1, db)
+    expect(windows.get('orchard/alpha')?.[0].snapshot).toBeDefined()
   })
 })
