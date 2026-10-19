@@ -62,7 +62,7 @@ function PortfolioPage() {
     return (
       <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
         <Header />
-        <EmptyState />
+        <EmptyState reason={session.reason} />
       </div>
     )
   }
