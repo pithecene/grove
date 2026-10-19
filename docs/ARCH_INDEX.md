@@ -67,6 +67,9 @@ Documentation and design artifacts.
   - `designs/ui-v0.md`
     Phase 1 UI implementation handoff.
 
+  - `designs/re-entry-v1.md`
+    Design proposal: official collection and backfill, and the "since this reference" view.
+
 ---
 
 ## Core Concepts
