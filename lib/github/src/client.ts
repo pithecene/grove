@@ -55,6 +55,32 @@ export async function fetchUserRepos(token: string): Promise<GitHubRepo[]> {
 /**
  * Fetch a single repository by full name (owner/name).
  */
+/**
+ * Whether a non-2xx response is GitHub throttling the caller rather than
+ * answering about the request: 429, or 403 with the primary quota exhausted
+ * (`x-ratelimit-remaining: 0`) or a secondary limit (`retry-after`).
+ */
+export function isRateLimitResponse(status: number, headers: Headers): boolean {
+  if (status === 429) return true
+  if (status !== 403) return false
+  return (
+    headers.get('x-ratelimit-remaining') === '0' || headers.get('retry-after') !== null
+  )
+}
+
+/** A non-2xx answer from the GitHub API, with what callers need to map it. */
+export class GitHubApiError extends Error {
+  readonly status: number
+  /** The answer is throttling, not a decision about the request */
+  readonly rateLimited: boolean
+  constructor(status: number, statusText: string, rateLimited = false) {
+    super(`GitHub API error: ${status} ${statusText}`)
+    this.name = 'GitHubApiError'
+    this.status = status
+    this.rateLimited = rateLimited
+  }
+}
+
 export async function fetchRepository(
   token: string,
   fullName: string,
@@ -67,8 +93,10 @@ export async function fetchRepository(
   })
 
   if (!response.ok) {
-    throw new Error(
-      `GitHub API error: ${response.status} ${response.statusText}`,
+    throw new GitHubApiError(
+      response.status,
+      response.statusText,
+      isRateLimitResponse(response.status, response.headers),
     )
   }
 
@@ -140,8 +168,10 @@ export async function fetchGroveYaml(
   if (response.status === 404) return undefined
 
   if (!response.ok) {
-    throw new Error(
-      `GitHub API error: ${response.status} ${response.statusText}`,
+    throw new GitHubApiError(
+      response.status,
+      response.statusText,
+      isRateLimitResponse(response.status, response.headers),
     )
   }
 
