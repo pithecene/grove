@@ -19,6 +19,7 @@ import type {
   RitualInvitation,
   ShapeDriftObservation,
 } from '@grove/core'
+import type { GitHubFailure } from '@grove/github'
 import {
   classifyRepository,
   fetchRepository,
@@ -27,11 +28,14 @@ import {
 import { createServerFn } from '@tanstack/react-start'
 
 import {
+  finishRun,
   getBindingsForIdentity,
   getDeclarationHistoryForIdentity,
   getSnapshotHistoryForIdentity,
   recordDeclarationIfChanged,
+  recordRunRepository,
   recordSnapshot,
+  startRun,
   upsertRepository,
 } from './db'
 import { type AccessFailure, accessFailure } from './github-state'
@@ -78,13 +82,46 @@ export const loadRepository = createServerFn({ method: 'GET' })
     // Outside the selected scope nothing is fetched or recorded.
     if (!isWithinScope(fullName, scope)) return { kind: 'out_of_scope' }
 
+    // A detail page is a collection about one repository: a run that
+    // targets a single name, so it never implies anything about the rest.
+    // It is opened once something is actually attempted (a redirect that
+    // leads outside the scope attempts nothing and leaves no run), but it
+    // is dated from the moment the collection began.
+    const startedAt = new Date().toISOString()
+    const openRun = () =>
+      startRun({ method: 'visit', stewardId: identity.id, fullPortfolio: false, scope, startedAt })
+    // The run keeps what GitHub actually answered (the evidence) under the
+    // name GitHub resolved; the page gets the mapped state.
+    const unavailable = (
+      runId: number,
+      failure: GitHubFailure,
+      subject: string,
+      resolvedName: string,
+      githubId?: number,
+    ): AccessFailure => {
+      recordRunRepository(runId, {
+        githubId,
+        fullName: resolvedName,
+        outcome: 'unavailable',
+        answer: failure.kind,
+      })
+      // The one targeted repository received its outcome, so the run is
+      // complete; the run-level answer is reserved for a collection that
+      // could not proceed as a whole.
+      finishRun(runId, { complete: true })
+      return accessFailure(failure, subject)
+    }
+
     const repoAnswer = await fetchRepository(token, fullName)
-    if (repoAnswer.kind !== 'ok') return accessFailure(repoAnswer, 'this repository')
+    if (repoAnswer.kind !== 'ok') {
+      return unavailable(openRun(), repoAnswer, 'this repository', fullName)
+    }
     const repo = repoAnswer.value
     // GitHub follows renames/transfers with a redirect: the resolved
     // repository may live outside the scope even when the requested name
     // did not. Nothing about it is classified or recorded in that case.
     if (!isWithinScope(repo.full_name, scope)) return { kind: 'out_of_scope' }
+    const runId = openRun()
 
     // Classify and fetch structural signals in parallel.
     // Entanglement (ecosystemRepoNames) is omitted here: it is a
@@ -100,7 +137,13 @@ export const loadRepository = createServerFn({ method: 'GET' })
       fetchStructuralSignals(token, fullName, repo.default_branch),
     ])
     if (ecologyAnswer.kind !== 'ok') {
-      return accessFailure(ecologyAnswer, `the declaration of ${repo.full_name}`)
+      return unavailable(
+        runId,
+        ecologyAnswer,
+        `the declaration of ${repo.full_name}`,
+        repo.full_name,
+        repo.id,
+      )
     }
     const ecology = ecologyAnswer.value
 
@@ -141,6 +184,12 @@ export const loadRepository = createServerFn({ method: 'GET' })
       undefined,
       repo.id,
     )
+    recordRunRepository(runId, {
+      githubId: repo.id,
+      fullName: repo.full_name,
+      outcome: snapshotWasRecorded ? 'observed' : 'unchanged',
+    })
+    finishRun(runId, { complete: true })
 
     // Build structural timeline from persisted history, followed across every
     // name this identity was observed under (the live binding was recorded by

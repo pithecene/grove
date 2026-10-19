@@ -121,6 +121,8 @@ export function recordSnapshot(
 /**
  * Record ecology snapshots for multiple repositories in a single transaction.
  * Interval check and inserts are all inside the transaction for atomicity.
+ * Returns the names a snapshot was recorded for; the others were within
+ * the interval (present, unchanged).
  */
 export function recordSnapshotBatch(
   entries: Array<{
@@ -129,8 +131,9 @@ export function recordSnapshotBatch(
     density?: DensityObservation
   }>,
   db: GroveDb = getDb(),
-) {
+): Set<string> {
   const now = new Date()
+  const recorded = new Set<string>()
   db.transaction(() => {
     for (const { ecology, signals, density } of entries) {
       if (isWithinInterval(ecology.fullName, now, db, ecology.githubId)) continue
@@ -138,8 +141,10 @@ export function recordSnapshotBatch(
         .values(buildSnapshotValues(ecology, signals, density, now))
         .run()
       extendBindingForName(ecology.fullName, now.toISOString(), db)
+      recorded.add(ecology.fullName)
     }
   })
+  return recorded
 }
 
 /**

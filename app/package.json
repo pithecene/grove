@@ -9,6 +9,7 @@
     "start": "NITRO_HOST=${NITRO_HOST:-127.0.0.1} node .output/server/index.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "collect": "tsx scripts/collect.ts",
     "identity:backfill": "tsx scripts/identity-backfill.ts"
   },
   "dependencies": {

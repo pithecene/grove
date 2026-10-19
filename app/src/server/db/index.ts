@@ -38,6 +38,15 @@ export {
   persistProposal,
   withdrawActiveProposal,
 } from './proposal-store'
+export type { RunMethod, RunOutcome, RunRepositoryRow, RunRow } from './runs'
+export {
+  finishRun,
+  getLatestCompleteFullRun,
+  getRun,
+  getRunRepositories,
+  recordRunRepository,
+  startRun,
+} from './runs'
 export type { SnapshotRow, WindowSubject } from './snapshots'
 export {
   getLatestSnapshot,
