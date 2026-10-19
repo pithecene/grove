@@ -165,9 +165,10 @@ export const loadPortfolio = createServerFn({ method: 'GET' }).handler(
       })),
     )
 
+    // Rows record the identity they were observed for (never dependent on a binding).
     recordSnapshotBatch(
       allRepos.map((ecology) => ({
-        ecology,
+        ecology: { ...ecology, githubId: idByName.get(ecology.fullName) },
         signals: signalsByName.get(ecology.fullName),
         density: densityByName.get(ecology.fullName),
       })),
@@ -178,6 +179,8 @@ export const loadPortfolio = createServerFn({ method: 'GET' }).handler(
         ecology.fullName,
         ecology.declaration,
         ecology.classified,
+        undefined,
+        idByName.get(ecology.fullName),
       )
     }
 

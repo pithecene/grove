@@ -404,20 +404,24 @@ export function listResolutions(db: GroveDb = getDb()): ResolutionRow[] {
  * exact instant each segment began.
  */
 function identityPredicate(
+  githubId: number,
   bindings: BindingRow[],
   column: {
     fullName: typeof ecologySnapshots.fullName
     observedAt: typeof ecologySnapshots.observedAt
+    githubId: typeof ecologySnapshots.githubId
   },
 ) {
-  const conditions = bindings.map((b) =>
+  // Rows that recorded their identity are matched by it directly; rows
+  // recorded before row identity (null) resolve through the bindings.
+  const bySegment = bindings.map((b) =>
     and(
       eq(column.fullName, b.fullName),
       gte(column.observedAt, b.firstObservedAt),
       lte(column.observedAt, b.lastObservedAt),
     ),
   )
-  return or(...conditions)
+  return or(eq(column.githubId, githubId), and(isNull(column.githubId), or(...bySegment)))
 }
 
 /**
@@ -433,9 +437,10 @@ export function getSnapshotHistoryForIdentity(
   const bindings = getBindingsForIdentity(githubId, db)
   if (bindings.length === 0) return []
 
-  const predicate = identityPredicate(bindings, {
+  const predicate = identityPredicate(githubId, bindings, {
     fullName: ecologySnapshots.fullName,
     observedAt: ecologySnapshots.observedAt,
+    githubId: ecologySnapshots.githubId,
   })
   const where = options.since
     ? and(predicate, gte(ecologySnapshots.observedAt, options.since))
@@ -462,10 +467,11 @@ export function getDeclarationHistoryForIdentity(
   if (bindings.length === 0) return []
 
   // Declaration rows share the snapshot columns' shape for name/time.
-  const predicate = identityPredicate(bindings, {
+  const predicate = identityPredicate(githubId, bindings, {
     fullName: declarationChanges.fullName as unknown as typeof ecologySnapshots.fullName,
     observedAt:
       declarationChanges.observedAt as unknown as typeof ecologySnapshots.observedAt,
+    githubId: declarationChanges.githubId as unknown as typeof ecologySnapshots.githubId,
   })
 
   return db

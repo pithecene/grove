@@ -128,11 +128,18 @@ export const loadRepository = createServerFn({ method: 'GET' })
     })
 
     const enrichedEcology = { ...ecology, density }
-    const snapshotWasRecorded = recordSnapshot(enrichedEcology, signals, density)
+    // Rows record the identity they were observed for (never dependent on a binding).
+    const snapshotWasRecorded = recordSnapshot(
+      { ...enrichedEcology, githubId: repo.id },
+      signals,
+      density,
+    )
     recordDeclarationIfChanged(
       ecology.fullName,
       ecology.declaration,
       ecology.classified,
+      undefined,
+      repo.id,
     )
 
     // Build structural timeline from persisted history, followed across every
