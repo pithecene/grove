@@ -34,11 +34,12 @@ export function EmptyState({ reason = 'missing' }: EmptyStateProps) {
       ),
     },
     unreachable: {
-      title: 'GitHub could not be reached.',
+      title: 'GitHub gave no usable answer.',
       body: (
         <>
-          The configured <Token /> could not be verified this time. Nothing was
-          observed; observation resumes when GitHub can be reached.
+          The configured <Token /> could not be verified this time — GitHub was
+          unreachable, unavailable or rate-limited. Nothing was observed; observation
+          resumes when GitHub answers.
         </>
       ),
     },

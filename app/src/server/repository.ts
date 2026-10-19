@@ -23,6 +23,7 @@ import {
   classifyRepository,
   fetchRepository,
   fetchStructuralSignals,
+  GitHubApiError,
 } from '@grove/github'
 import { createServerFn } from '@tanstack/react-start'
 
@@ -51,7 +52,7 @@ export interface RepositoryDetail {
 
 export const loadRepository = createServerFn({ method: 'GET' })
   .inputValidator((data: { owner: string; name: string }) => data)
-  .handler(async ({ data }): Promise<RepositoryDetail> => {
+  .handler(async ({ data }): Promise<RepositoryDetail | undefined> => {
     const identity = await getStewardIdentity()
 
     if (!identity) {
@@ -61,7 +62,15 @@ export const loadRepository = createServerFn({ method: 'GET' })
     const token = identity.token
 
     const fullName = `${data.owner}/${data.name}`
-    const repo = await fetchRepository(token, fullName)
+    // A repository GitHub reports as missing or not accessible with this
+    // token has no detail to show; anything else is a real failure.
+    const repo = await fetchRepository(token, fullName).catch((err: unknown) => {
+      if (err instanceof GitHubApiError && (err.status === 404 || err.status === 403)) {
+        return undefined
+      }
+      throw err
+    })
+    if (!repo) return undefined
 
     // Classify and fetch structural signals in parallel.
     // Entanglement (ecosystemRepoNames) is omitted here: it is a

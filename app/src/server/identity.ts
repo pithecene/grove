@@ -28,9 +28,12 @@ export function isConfigured(): boolean {
 export type IdentityUnavailableReason =
   /** GROVE_GITHUB_TOKEN is not set */
   | 'missing'
-  /** GitHub answered but did not accept the token (401/403, or any non-2xx) */
+  /** GitHub refused the token: 401, or 403 that is not a rate limit */
   | 'rejected'
-  /** GitHub could not be reached; the token is unverified, not refused */
+  /**
+   * GitHub gave no usable answer — network failure, 5xx, or a rate limit —
+   * so the token is unverified this time, not refused
+   */
   | 'unreachable'
 
 export type IdentityResolution =
@@ -57,10 +60,24 @@ export async function resolveStewardIdentity(): Promise<IdentityResolution> {
     })
 
     if (!response.ok) {
+      // Only an authentication failure says anything about the token. A
+      // rate limit (429, or 403 with the quota exhausted) and server errors
+      // leave it unverified.
+      const rateLimited =
+        response.status === 429 ||
+        (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')
+      const rejected =
+        response.status === 401 || (response.status === 403 && !rateLimited)
       console.warn(
-        `[grove] GitHub identity check failed (${response.status}). Check that GROVE_GITHUB_TOKEN is valid.`,
+        rejected
+          ? `[grove] GitHub did not accept GROVE_GITHUB_TOKEN (${response.status}).`
+          : `[grove] GitHub identity check gave no usable answer (${response.status}); token unverified.`,
       )
-      return { kind: 'unavailable', reason: 'rejected', status: response.status }
+      return {
+        kind: 'unavailable',
+        reason: rejected ? 'rejected' : 'unreachable',
+        status: response.status,
+      }
     }
 
     const user = await response.json()

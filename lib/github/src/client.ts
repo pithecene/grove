@@ -51,6 +51,16 @@ export async function fetchUserRepos(token: string): Promise<GitHubRepo[]> {
 /**
  * Fetch a single repository by full name (owner/name).
  */
+/** A non-2xx answer from the GitHub API, with its status for callers to map. */
+export class GitHubApiError extends Error {
+  readonly status: number
+  constructor(status: number, statusText: string) {
+    super(`GitHub API error: ${status} ${statusText}`)
+    this.name = 'GitHubApiError'
+    this.status = status
+  }
+}
+
 export async function fetchRepository(
   token: string,
   fullName: string,
@@ -63,9 +73,7 @@ export async function fetchRepository(
   })
 
   if (!response.ok) {
-    throw new Error(
-      `GitHub API error: ${response.status} ${response.statusText}`,
-    )
+    throw new GitHubApiError(response.status, response.statusText)
   }
 
   const r: GitHubRepo = await response.json()
