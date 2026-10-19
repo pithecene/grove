@@ -2,25 +2,29 @@ import { createFileRoute, Link } from '@tanstack/react-router'
 
 import { EmptyState } from '../components/EmptyState'
 import { Header } from '../components/Header'
+import { LookupNotice } from '../components/LookupNotice'
 import { PaginationControls } from '../components/PaginationControls'
 import { RepoCard } from '../components/RepoCard'
 import { usePagination } from '../hooks/usePagination'
 import { getSession } from '../server/auth'
-import { loadPortfolio } from '../server/portfolio'
+import { loadPortfolio, type PortfolioView } from '../server/portfolio'
 
 export const Route = createFileRoute('/unclassified')({
   component: UnclassifiedPage,
   loader: async () => {
-    const [session, portfolio] = await Promise.all([
+    const [session, lookup] = await Promise.all([
       getSession(),
       loadPortfolio(),
     ])
-    return { session, portfolio }
+    return { session, lookup }
   },
 })
 
+const NOTHING_OBSERVED: PortfolioView = { repositories: [], unclassified: [] }
+
 function UnclassifiedPage() {
-  const { session, portfolio } = Route.useLoaderData()
+  const { session, lookup } = Route.useLoaderData()
+  const portfolio = lookup.kind === 'observed' ? lookup.portfolio : NOTHING_OBSERVED
 
   const { page, totalPages, paginated, setPage } = usePagination(
     portfolio.unclassified,
@@ -34,6 +38,28 @@ function UnclassifiedPage() {
         <EmptyState reason={session.reason} />
       </div>
     )
+  }
+
+  if (lookup.kind === 'unauthenticated') {
+    return (
+      <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
+        <Header />
+        <EmptyState reason={lookup.reason} />
+      </div>
+    )
+  }
+
+  if (lookup.kind === 'token_rejected') {
+    return (
+      <div style={{ backgroundColor: 'var(--grove-bg)', minHeight: '100vh' }}>
+        <Header />
+        <EmptyState reason="rejected" />
+      </div>
+    )
+  }
+
+  if (lookup.kind !== 'observed') {
+    return <LookupNotice login={session.login} subject="portfolio" state={lookup} />
   }
 
   const seasonAttr = portfolio.climate ?? undefined

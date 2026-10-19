@@ -1,4 +1,4 @@
-import type { RepositoryResolution } from '@grove/github'
+import type { GitHubAnswer, GitHubRepo } from '@grove/github'
 import Database from 'better-sqlite3'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -29,10 +29,10 @@ function seedName(fullName: string, snapshotDays: string[]) {
   }
 }
 
-const resolvedTo = (id: number, fullName: string, createdAt: string): RepositoryResolution => ({
-  outcome: 'resolved',
+const resolvedTo = (id: number, fullName: string, createdAt: string): GitHubAnswer<GitHubRepo> => ({
+  kind: 'ok',
   status: 200,
-  repo: {
+  value: {
     id,
     full_name: fullName,
     html_url: `https://github.com/${fullName}`,
@@ -54,7 +54,7 @@ describe('backfill floors a name by the identity’s observations under other na
     const pair: NameResolver = async (name) =>
       name === 'orchard/former' || name === 'orchard/reused'
         ? resolvedTo(300, 'orchard/reused', '2025-01-01T00:00:00.000Z')
-        : { outcome: 'error', status: 500, message: 'synthetic' }
+        : { kind: 'unavailable', status: 500 }
 
     const report = await backfillIdentities(db, pair, { apply: true, now: clock })
     const reused = report.entries.find((e) => e.fullName === 'orchard/reused')

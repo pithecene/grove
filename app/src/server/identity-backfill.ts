@@ -1,4 +1,4 @@
-import type { RepositoryResolution } from '@grove/github'
+import type { GitHubAnswer, GitHubRepo } from '@grove/github'
 
 import type { BindingFloorBasis, GroveDb } from './db'
 import {
@@ -12,7 +12,7 @@ import {
 import { isWithinScope, type PortfolioScope } from './scope'
 
 /** Resolves a historical name against GitHub (injectable for tests). */
-export type NameResolver = (fullName: string) => Promise<RepositoryResolution>
+export type NameResolver = (fullName: string) => Promise<GitHubAnswer<GitHubRepo>>
 
 export type BackfillOutcome =
   | 'bound'
@@ -65,13 +65,31 @@ export interface BackfillOptions {
   now?: () => string
 }
 
-type ResolvedRepo = Extract<RepositoryResolution, { outcome: 'resolved' }>['repo']
-
 interface Candidate {
   fullName: string
-  repo: ResolvedRepo
+  repo: GitHubRepo
   status: number
   span: { first: string; last: string } | undefined
+}
+
+/** How an answer that is not a repository is recorded. */
+function outcomeOf(answer: Exclude<GitHubAnswer<GitHubRepo>, { kind: 'ok' }>): {
+  outcome: BackfillOutcome
+  httpStatus?: number
+  message?: string
+} {
+  switch (answer.kind) {
+    case 'not_found':
+      return { outcome: 'not_found', httpStatus: answer.status }
+    case 'forbidden':
+    case 'unauthorized':
+      return { outcome: 'forbidden', httpStatus: answer.status }
+    case 'throttled':
+    case 'unavailable':
+      return { outcome: 'error', httpStatus: answer.status, message: answer.kind }
+    case 'unreachable':
+      return { outcome: 'error', message: answer.message }
+  }
 }
 
 /**
@@ -111,29 +129,25 @@ export async function backfillIdentities(
   // Phase 1 — resolve every name; record what cannot be bound.
   const candidates: Candidate[] = []
   for (const fullName of names) {
-    const resolution = await resolve(fullName)
+    const answer = await resolve(fullName)
     const span = getObservedSpanForName(fullName, db)
 
-    if (resolution.outcome !== 'resolved') {
+    if (answer.kind !== 'ok') {
+      const { outcome, httpStatus, message } = outcomeOf(answer)
       if (!isWithinScope(fullName, options.scope)) {
-        entries.push({ fullName, outcome: 'out_of_scope', httpStatus: resolution.status })
+        entries.push({ fullName, outcome: 'out_of_scope', httpStatus })
         continue
       }
-      const entry: BackfillEntry = {
-        fullName,
-        outcome: resolution.outcome,
-        httpStatus: resolution.status,
-        message: resolution.outcome === 'error' ? resolution.message : undefined,
-      }
+      const entry: BackfillEntry = { fullName, outcome, httpStatus, message }
       entries.push(entry)
       if (options.apply) {
         recordResolution(
           {
             fullName,
             attemptedAt,
-            outcome: resolution.outcome,
-            httpStatus: resolution.status,
-            evidence: { message: entry.message },
+            outcome,
+            httpStatus,
+            evidence: { answer: answer.kind, message },
           },
           db,
         )
@@ -141,19 +155,19 @@ export async function backfillIdentities(
       continue
     }
 
-    const { repo } = resolution
+    const repo = answer.value
     if (!isWithinScope(repo.full_name, options.scope)) {
       entries.push({
         fullName,
         outcome: 'out_of_scope',
         githubId: repo.id,
         resolvedFullName: repo.full_name,
-        httpStatus: resolution.status,
+        httpStatus: answer.status,
       })
       continue
     }
 
-    candidates.push({ fullName, repo, status: resolution.status, span })
+    candidates.push({ fullName, repo, status: answer.status, span })
   }
 
   // Phase 2 — bind in the order observations end, earliest-ending first.

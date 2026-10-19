@@ -27,7 +27,8 @@ import {
   evaluatePortfolioEcosystemTriggers,
   evaluatePortfolioProposals,
 } from './ecosystem-triggers'
-import { getStewardIdentity, isConfigured } from './identity'
+import { type AccessFailure, accessFailure } from './github-state'
+import { type IdentityUnavailableReason, resolveStewardIdentity } from './identity'
 import { applyScope, parseScope } from './scope'
 
 const BATCH_SIZE = 10
@@ -37,37 +38,56 @@ const BATCH_SIZE = 10
  * Fetches .grove.yaml concurrently in batches, then enriches
  * classified repos with structural signals and density.
  */
-export const loadPortfolio = createServerFn({ method: 'GET' }).handler(
-  async (): Promise<
-    Portfolio & {
-      ecosystemTriggers?: EcosystemTriggerResult
-      climateProposal?: ClimateProposal
-    }
-  > => {
-    if (!isConfigured()) {
-      return { repositories: [], unclassified: [] }
-    }
+export type PortfolioView = Portfolio & {
+  ecosystemTriggers?: EcosystemTriggerResult
+  climateProposal?: ClimateProposal
+}
 
-    // Resolve identity first — degrades to empty portfolio on bad/expired token
-    const identity = await getStewardIdentity()
-    if (!identity) {
-      return { repositories: [], unclassified: [] }
+/**
+ * What a portfolio load produced. Only `observed` carries a portfolio; the
+ * other kinds say why nothing was observed. A listing GitHub did not answer
+ * is never shown as an empty portfolio, and nothing is recorded for it.
+ */
+export type PortfolioLookup =
+  | { kind: 'observed'; portfolio: PortfolioView }
+  /** No steward identity, and why — the same reason the session reports */
+  | { kind: 'unauthenticated'; reason: IdentityUnavailableReason }
+  | AccessFailure
+
+export const loadPortfolio = createServerFn({ method: 'GET' }).handler(
+  async (): Promise<PortfolioLookup> => {
+    // Identity first — no token, or no usable answer about it, means nothing
+    // to observe; the reason travels with the result.
+    const resolution = await resolveStewardIdentity()
+    if (resolution.kind === 'unavailable') {
+      return { kind: 'unauthenticated', reason: resolution.reason }
     }
+    const { identity } = resolution
 
     const token = identity.token
     // Explicit, private selection of what to observe (GROVE_SCOPE_*).
     // Repositories outside the scope are not enumerated further and nothing
     // previously recorded about them is touched.
-    const repos = applyScope(await fetchUserRepos(token), parseScope())
+    const listing = await fetchUserRepos(token)
+    if (listing.kind !== 'ok') return accessFailure(listing, 'the portfolio listing')
+    const repos = applyScope(listing.value, parseScope())
     const idByName = new Map(repos.map((r) => [r.full_name, r.id]))
 
     // Phase 1: Classify in batches
     const classified: RepositoryEcology[] = []
     for (let i = 0; i < repos.length; i += BATCH_SIZE) {
       const batch = repos.slice(i, i + BATCH_SIZE)
-      const results = await Promise.all(
+      const answers = await Promise.all(
         batch.map((repo) => classifyRepository(token, repo)),
       )
+      // One repository GitHub did not answer about is not "unclassified":
+      // nothing is recorded for the portfolio this time.
+      const failedAt = answers.findIndex((a) => a.kind !== 'ok')
+      const failed = answers[failedAt]
+      if (failed && failed.kind !== 'ok') {
+        return accessFailure(failed, `the declaration of ${batch[failedAt].full_name}`)
+      }
+      const results = answers.flatMap((a) => (a.kind === 'ok' ? [a.value] : []))
       classified.push(...results)
     }
 
@@ -179,11 +199,14 @@ export const loadPortfolio = createServerFn({ method: 'GET' }).handler(
       : undefined
 
     return {
-      repositories,
-      unclassified,
-      climate,
-      ecosystemTriggers,
-      climateProposal,
+      kind: 'observed',
+      portfolio: {
+        repositories,
+        unclassified,
+        climate,
+        ecosystemTriggers,
+        climateProposal,
+      },
     }
   },
 )

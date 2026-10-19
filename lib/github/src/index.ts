@@ -1,11 +1,10 @@
 export { classifyRepository } from './classify'
 export {
+  failureOf,
   fetchGroveYaml,
   fetchRepository,
   fetchUserRepos,
-  GitHubApiError,
-  isRateLimitResponse,
-  resolveRepositoryByName,
+  fetchViewer,
 } from './client'
 export { fetchStructuralSignals } from './signals'
-export type { GitHubRepo, RepositoryResolution } from './types'
+export type { GitHubAnswer, GitHubFailure, GitHubRepo, GitHubViewer } from './types'

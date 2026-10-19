@@ -1,4 +1,4 @@
-import type { RepositoryResolution } from '@grove/github'
+import type { GitHubAnswer, GitHubRepo } from '@grove/github'
 import Database from 'better-sqlite3'
 import { beforeEach, describe, expect, it } from 'vitest'
 
@@ -29,11 +29,11 @@ beforeEach(() => {
   }
 })
 
-function resolved(id: number, fullName: string): RepositoryResolution {
+function resolved(id: number, fullName: string): GitHubAnswer<GitHubRepo> {
   return {
-    outcome: 'resolved',
+    kind: 'ok',
     status: 200,
-    repo: {
+    value: {
       id,
       full_name: fullName,
       html_url: `https://github.com/${fullName}`,
@@ -50,9 +50,9 @@ const resolver: NameResolver = async (name) =>
       'former-owner/thing': resolved(100, 'orchard/thing'), // renamed into scope
       'orchard/kept': resolved(200, 'orchard/kept'),
       'neighbour/other': resolved(300, 'neighbour/other'), // outside scope
-      'former-owner/gone': { outcome: 'not_found', status: 404 },
-    }) as Record<string, RepositoryResolution>
-  )[name] ?? { outcome: 'error', status: 500, message: 'synthetic' }
+      'former-owner/gone': { kind: 'not_found', status: 404 },
+    }) as Record<string, GitHubAnswer<GitHubRepo>>
+  )[name] ?? { kind: 'unavailable', status: 500 }
 
 describe('backfill with a configured scope', () => {
   it('records only repositories that resolve into the scope; former names still resolve', async () => {
