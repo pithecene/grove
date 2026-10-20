@@ -28,6 +28,8 @@ export type TimelineEntry =
       tier: string
       spanEnd: string
       observationCount: number
+      /** Distinct UTC days in the run (a day may hold more than one row) */
+      days: number
       freshlyRecorded?: boolean
       /** `observed`, `history`, or `mixed` when the run spans both methods */
       method: 'observed' | 'history' | 'mixed'
@@ -41,7 +43,7 @@ export type TimelineEntry =
       recordedAt: string | null
     }
   | {
-      /** No observation between `lastObservedAt` and `observedAt` (the resumption). */
+      /** No row of any kind between `lastObservedAt` and `observedAt` (the resumption). */
       kind: 'observation_gap'
       observedAt: string
       lastObservedAt: string
@@ -58,18 +60,6 @@ export type TimelineEntry =
       fromName: string
       toName: string
       lastSeenUnderPrevious: string
-    }
-  | {
-      /**
-       * Consecutive days whose rows were recorded from the repository's
-       * commit history (the retrospective branch state), not observed.
-       * `observedAt` is the first such day, `spanEnd` the last.
-       */
-      kind: 'history_span'
-      observedAt: string
-      spanEnd: string
-      days: number
-      recordedAt: string | null
     }
 
 export interface TimelineIdentity {
@@ -90,11 +80,11 @@ export interface TimelineIdentity {
  * @param identity - when given, name changes between bindings are emitted.
  * @param declarationsComplete - true when the fetched declaration rows are
  *   the full declaration history (rows returned < limit).
- * @param series - optional separately fetched series: `observed` snapshots
- *   (with their own truncation state) bound the spans without observation,
- *   and `historyDays` (dates only, all of them) form the spans recorded from
- *   history. Without them both are derived from `snapshotsDesc`, which a
- *   long reconstructed run would crowd out of a bounded window.
+ * @param series - optional separately fetched series: `observed` rows (with
+ *   their own truncation state) and `historyDays` (dates only, all of them)
+ *   together bound the spans without any row. Without them the spans are
+ *   derived from `snapshotsDesc`, which a long run of days would crowd out
+ *   of a bounded window.
  */
 export function buildTimeline(
   snapshotsDesc: SnapshotRow[],
@@ -125,21 +115,24 @@ export function buildTimeline(
   }
 
   const declarationEntries = buildDeclarationEntries(declarationsDesc)
+  // Every row is a day of the series, however it was recorded: a span is
+  // empty only where there is no row at all.
   const gapEntries = series
-    ? buildGapEntries(series.observed.snapshots, series.observed.declarations, {
-        snapshotsComplete: series.observed.complete,
-        declarationsComplete: series.observed.declarationsComplete,
-      })
+    ? buildGapEntries(
+        [...series.observed.snapshots, ...series.historyDays].sort((a, b) =>
+          b.observedAt.localeCompare(a.observedAt),
+        ),
+        series.observed.declarations,
+        {
+          snapshotsComplete: series.observed.complete,
+          declarationsComplete: series.observed.declarationsComplete,
+        },
+      )
     : buildGapEntries(snapshotsDesc, declarationsDesc, {
         snapshotsComplete: historyComplete,
         declarationsComplete,
       })
   const nameEntries = identity ? buildNameChangeEntries(identity.bindings) : []
-  const historyEntries = buildHistorySpanEntries(
-    series
-      ? series.historyDays.map((d) => ({ ...d, method: 'history' }))
-      : snapshotsDesc,
-  )
 
   // Merge chronologically DESC (most recent first). On equal timestamps a
   // gap sorts after (older than) the observation that ended it.
@@ -148,7 +141,6 @@ export function buildTimeline(
     ...declarationEntries,
     ...gapEntries,
     ...nameEntries,
-    ...historyEntries,
   ].sort((a, b) => {
     const byTime = b.observedAt.localeCompare(a.observedAt)
     if (byTime !== 0) return byTime
@@ -193,14 +185,12 @@ export interface GapBounds {
 }
 
 export function buildGapEntries(
-  snapshotsDesc: SnapshotRow[],
-  declarationsDesc: DeclarationRow[] = [],
+  snapshotsDesc: Array<{ observedAt: string }>,
+  declarationsDesc: Array<{ observedAt: string }> = [],
   bounds: GapBounds = {},
 ): TimelineEntry[] {
-  // Only contemporaneous observations bound a span: a row recorded from
-  // history says what the repository was, not that Grove looked.
-  const observedSnapshots = snapshotsDesc.filter((s) => s.method !== 'history')
-  const observedDeclarations = declarationsDesc.filter((d) => d.method !== 'history')
+  const observedSnapshots = snapshotsDesc
+  const observedDeclarations = declarationsDesc
   const edges: string[] = []
   if (bounds.snapshotsComplete === false && observedSnapshots.length > 0) {
     edges.push(observedSnapshots[observedSnapshots.length - 1].observedAt)
@@ -232,56 +222,6 @@ export function buildGapEntries(
       })
     }
   }
-  return entries
-}
-
-// ── Spans recorded from history ───────────────────────────────────
-
-/**
- * One entry per run of consecutive UTC days whose snapshot was recorded
- * from the repository's commit history. Presented beside — never in place
- * of — the spans without observation.
- */
-export function buildHistorySpanEntries(
-  snapshotsDesc: Array<{ observedAt: string; recordedAt: string | null; method: string }>,
-): TimelineEntry[] {
-  const asc = snapshotsDesc
-    .filter((s) => s.method === 'history')
-    .map((s) => ({ day: s.observedAt.slice(0, 10), row: s }))
-    .sort((a, b) => a.day.localeCompare(b.day))
-  const entries: TimelineEntry[] = []
-  let start: (typeof asc)[number] | undefined
-  let last: (typeof asc)[number] | undefined
-  let days = 0
-  const flush = () => {
-    if (start && last) {
-      entries.push({
-        kind: 'history_span',
-        observedAt: start.row.observedAt,
-        spanEnd: last.row.observedAt,
-        days,
-        recordedAt: last.row.recordedAt,
-      })
-    }
-  }
-  for (const item of asc) {
-    if (last && item.day === last.day) continue
-    // A span is one recording as well as one run of days: a later backfill
-    // that continued an earlier one starts a new span, so each carries the
-    // date it was actually recorded on.
-    const consecutive =
-      last !== undefined &&
-      new Date(item.day).getTime() - new Date(last.day).getTime() === MS_PER_DAY &&
-      item.row.recordedAt === last.row.recordedAt
-    if (!consecutive) {
-      flush()
-      start = item
-      days = 0
-    }
-    last = item
-    days++
-  }
-  flush()
   return entries
 }
 
@@ -328,6 +268,7 @@ function buildDensityEntries(
   // Walk ascending — detect transitions and compress spans
   let runStart = withTier[0]
   let runCount = 1
+  let runDays = new Set<string>([withTier[0].observedAt.slice(0, 10)])
   let runMethods = new Set<string>([withTier[0].method])
   let prevTier: string | null = null
   const spanMethod = (methods: Set<string>): 'observed' | 'history' | 'mixed' =>
@@ -353,6 +294,7 @@ function buildDensityEntries(
     if (snap.densityTier === prevTier) {
       // Continue the run
       runCount++
+      runDays.add(snap.observedAt.slice(0, 10))
       runMethods.add(snap.method)
     } else {
       // Emit span for the completed run (only if run >= 2)
@@ -363,6 +305,7 @@ function buildDensityEntries(
           tier: prevTier!,
           spanEnd: withTier[i - 1].observedAt,
           observationCount: runCount,
+          days: runDays.size,
           method: spanMethod(runMethods),
         })
       }
@@ -379,6 +322,7 @@ function buildDensityEntries(
       prevTier = snap.densityTier
       runStart = snap
       runCount = 1
+      runDays = new Set([snap.observedAt.slice(0, 10)])
       runMethods = new Set([snap.method])
     }
   }
@@ -391,6 +335,7 @@ function buildDensityEntries(
       tier: prevTier!,
       spanEnd: withTier[withTier.length - 1].observedAt,
       observationCount: runCount,
+      days: runDays.size,
       method: spanMethod(runMethods),
     })
   }

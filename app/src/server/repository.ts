@@ -29,10 +29,6 @@ import { createServerFn } from '@tanstack/react-start'
 
 import {
   finishRun,
-  getBindingsForIdentity,
-  getDeclarationHistoryForIdentity,
-  getHistoryDaysForIdentity,
-  getSnapshotHistoryForIdentity,
   recordDeclarationIfChanged,
   recordRunRepository,
   recordSnapshot,
@@ -42,8 +38,8 @@ import {
 import { type AccessFailure, accessFailure } from './github-state'
 import { getStewardIdentity } from './identity'
 import { isWithinScope, parseScope } from './scope'
+import { timelineForIdentity } from './identity-timeline'
 import type { TimelineEntry } from './timeline'
-import { buildTimeline } from './timeline'
 
 export interface RepositoryDetail {
   ecology: RepositoryEcology
@@ -195,44 +191,13 @@ export const loadRepository = createServerFn({ method: 'GET' })
     // Build structural timeline from persisted history, followed across every
     // name this identity was observed under (the live binding was recorded by
     // the upsert above, so the current name is always included).
-    // Fetch one extra row to distinguish "exactly at limit" from "truncated".
-    const HISTORY_LIMIT = 50
-    const snapshotRows = getSnapshotHistoryForIdentity(repo.id, { limit: HISTORY_LIMIT + 1 })
-    const declarationRows = getDeclarationHistoryForIdentity(repo.id, HISTORY_LIMIT + 1)
-    const historyComplete = snapshotRows.length <= HISTORY_LIMIT
-    const declarationHistoryComplete = declarationRows.length <= HISTORY_LIMIT
-    const snapshots = snapshotRows.slice(0, HISTORY_LIMIT)
-    const declarations = declarationRows.slice(0, HISTORY_LIMIT)
-    // Spans without observation are read from observed rows alone, fetched
-    // on their own so that days recorded from history cannot crowd them out
-    // of the window; spans recorded from history come from all such days.
-    const observedRows = getSnapshotHistoryForIdentity(repo.id, {
-      limit: HISTORY_LIMIT + 1,
-      method: 'observed',
-    })
-    const observedDeclarations = getDeclarationHistoryForIdentity(
-      repo.id,
-      HISTORY_LIMIT + 1,
-      undefined,
-      'observed',
-    )
-    const timeline = buildTimeline(
+    const {
+      timeline,
       snapshots,
-      declarations,
-      snapshotWasRecorded,
-      historyComplete,
-      { bindings: getBindingsForIdentity(repo.id) },
-      declarationHistoryComplete,
-      {
-        observed: {
-          snapshots: observedRows.slice(0, HISTORY_LIMIT),
-          complete: observedRows.length <= HISTORY_LIMIT,
-          declarations: observedDeclarations.slice(0, HISTORY_LIMIT),
-          declarationsComplete: observedDeclarations.length <= HISTORY_LIMIT,
-        },
-        historyDays: getHistoryDaysForIdentity(repo.id),
-      },
-    )
+      declarations: declarationRows,
+    } = timelineForIdentity(repo.id, snapshotWasRecorded)
+    const historyComplete = true
+    const declarationHistoryComplete = true
 
     // Observe phase duration from declaration history (uses already-fetched rows).
     // If all fetched rows share the current phase, the true start may predate
@@ -249,12 +214,12 @@ export const loadRepository = createServerFn({ method: 'GET' })
     )
 
     // Observe shape and motion drift (uses already-fetched data).
-    // Pass full snapshotRows (pre-slice) so the +1 boundary row is
-    // available as a potential reference. Pass historyComplete to
-    // suppress when the phase baseline cannot be reliably established.
+    // The whole series is fetched, so every row is available as a potential
+    // reference. Pass historyComplete to suppress when the phase baseline
+    // cannot be reliably established.
     const referenceSnapshot = findReferenceSnapshot(
       phaseLastDeclaredAt,
-      snapshotRows,
+      snapshots,
       historyComplete,
     )
     const shapeDrift = referenceSnapshot
